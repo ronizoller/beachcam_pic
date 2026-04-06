@@ -1,0 +1,27 @@
+# Surf E-Ink Frame - Python Dependencies
+
+# Web scraping (for WebRTC camera capture)
+playwright>=1.40.0
+
+# Image processing
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Optional: OCR for ad detection
+# pytesseract>=0.3.10
+
+# HTTP server
+flask>=3.0.0
+
+# Configuration
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Scheduling
+schedule>=1.2.0
+
+# Weather API
+requests>=2.31.0
+
+# Timezone handling
+pytz>=2023.3

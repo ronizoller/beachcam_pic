@@ -1,0 +1,110 @@
+# Surf E-Ink Frame Configuration
+# All settings here - no code changes needed to adjust behavior
+
+# ========== CAMERA SOURCES ==========
+cameras:
+  - name: "Tel Aviv - Jaffa & Western Beach"
+    url: "https://ipcamlive.com/player/snapshot.php?alias=664cd75b7639c"
+    enabled: true
+    priority: 1
+    type: "snapshot"
+    # Crop out the "(c)BeachCam Israel" watermark at the top
+    # Format: [left, top, right, bottom]
+    crop_box: [0, 80, 1920, 1080]
+    wait_seconds: 0
+
+  # Keep Hamaaravi as fallback (might come back online)
+  - name: "Tel Aviv - Hamaaravi Beach"
+    url: "https://beachcam.co.il/hamaaravi.html"
+    enabled: false  # Disabled - gocamstream is down
+    priority: 2
+    type: "webrtc"
+    crop_box: null
+    wait_seconds: 15
+
+  # Add more cameras as fallback
+  # - name: "Tel Aviv - Gordon Beach"
+  #   url: "https://example.com/gordon"
+  #   enabled: false
+  #   priority: 2
+  #   type: "webrtc"
+  #   crop_box: [100, 50, 1800, 950]
+
+# ========== TIMING ==========
+timing:
+  fetch_interval_minutes: 5
+  esp_sleep_minutes: 30
+  retry_on_fail_seconds: 60
+  max_retries: 3
+
+  # Only fetch during daytime
+  active_hours:
+    enabled: true
+    start: "06:00"
+    end: "20:00"
+    timezone: "Asia/Jerusalem"
+
+# ========== DISPLAY (E-Ink) ==========
+display:
+  width: 800
+  height: 480
+  # Color modes: "7color", "6color", "5color", "3color", "bw"
+  color_mode: "6color"
+  # Dithering: true = detail with some noise, false = flat/posterized
+  dithering: true
+
+# ========== OVERLAY ==========
+# Minimal text overlay on image (not a separate bar)
+overlay:
+  enabled: true
+  style: "minimal"  # minimal = clean text on image
+  show:
+    location: true
+    wave_height: true
+    wind_direction: true
+    rating_badge: true  # Top-right surf quality badge
+
+# ========== SURF PREFERENCES ==========
+# Used to calculate surf quality rating
+surf_preferences:
+  min_wave_cm: 60   # Your minimum preferred wave height
+  max_wave_cm: 110  # Your maximum preferred wave height
+  max_wind_kmh: 25  # Maximum acceptable wind speed
+
+# ========== SURF & WEATHER API ==========
+# Using Open-Meteo (free, no API key needed)
+weather:
+  enabled: true
+  provider: "open-meteo"
+  location:
+    lat: 32.0853
+    lon: 34.7818
+    name: "Tel Aviv"
+
+# ========== AD DETECTION ==========
+filter:
+  # Reject frames with too much text (likely ads)
+  max_text_area_percent: 15
+  # Reject frames with unusual colors (not sea/sky/sand)
+  check_color_distribution: true
+  # Expected dominant colors for beach scene
+  expected_colors: ["blue", "tan", "white", "gray"]
+  # Minimum similarity to last known good frame
+  min_similarity: 0.3
+
+# ========== HTTP SERVER ==========
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+# ========== PATHS ==========
+paths:
+  data_dir: "./data"
+  current_image: "./data/current.bmp"
+  current_raw: "./data/current_raw.png"
+  metadata: "./data/metadata.json"
+
+# ========== LOGGING ==========
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "./data/beachcam.log"
