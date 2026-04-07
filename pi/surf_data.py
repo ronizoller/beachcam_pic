@@ -28,6 +28,7 @@ class SurfPreferences:
     min_wave_cm: int = 60   # Minimum wave height in cm
     max_wave_cm: int = 110  # Maximum wave height in cm
     max_wind_kmh: int = 25  # Max acceptable wind speed
+    beach_facing: int = 270  # Direction beach faces (degrees). 270 = West (Tel Aviv)
 
 
 @dataclass
@@ -98,20 +99,35 @@ class SurfConditions:
             else:
                 score += 0.5
 
-        # Wind score (0-3 points)
+        # Wind speed score (0-2 points)
         # Lower wind = better conditions
         if self.wind_speed is not None:
             if self.wind_speed <= 5:
-                score += 3.0  # Glass-off conditions
+                score += 2.0  # Glass-off conditions
             elif self.wind_speed <= 10:
-                score += 2.5
+                score += 1.5
             elif self.wind_speed <= 15:
-                score += 2.0
-            elif self.wind_speed <= 20:
                 score += 1.0
-            elif self.wind_speed <= prefs.max_wind_kmh:
+            elif self.wind_speed <= 20:
                 score += 0.5
-            # Above max wind = no bonus
+            # Above 20 = no bonus
+
+        # Wind direction score (0-1 point)
+        # Offshore = best, onshore = worst
+        if self.wind_direction is not None and self.wind_speed and self.wind_speed > 5:
+            # Calculate offshore direction (opposite of beach facing)
+            offshore_dir = (prefs.beach_facing + 180) % 360
+            # Angle difference between wind and offshore
+            angle_diff = abs(self.wind_direction - offshore_dir)
+            if angle_diff > 180:
+                angle_diff = 360 - angle_diff
+            # 0° diff = perfect offshore, 180° = onshore
+            if angle_diff <= 45:
+                score += 1.0  # Offshore
+            elif angle_diff <= 90:
+                score += 0.5  # Side-offshore
+            elif angle_diff >= 135:
+                score -= 0.5  # Onshore penalty
 
         # Round and clamp to 1-10
         rating = max(1, min(10, round(score)))

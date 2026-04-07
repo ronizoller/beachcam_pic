@@ -126,28 +126,28 @@ class Processor:
         """
         img = image.convert("RGB")
 
-        # 1. Minimal blur - preserve texture/detail
-        img = img.filter(ImageFilter.GaussianBlur(radius=0.3))
+        # 1. Moderate blur - smooth noise while keeping structure
+        img = img.filter(ImageFilter.GaussianBlur(radius=1.1))
 
         # 2. Reduce saturation slightly (0.9 = 90% of original)
         saturation_enhancer = ImageEnhance.Color(img)
         img = saturation_enhancer.enhance(0.9)
 
-        # 3. Boost contrast for better definition
+        # 3. Compress dynamic range (bring darks up, brights down)
         contrast_enhancer = ImageEnhance.Contrast(img)
-        img = contrast_enhancer.enhance(1.25)
+        img = contrast_enhancer.enhance(0.85)
 
-        # 4. Add warmth (boost red/yellow, reduce blue)
-        img = self._add_warmth(img, 0.25)
+        # 5. Neutral color temperature
+        img = self._add_warmth(img, 0.05)
 
         return img
 
     def _add_warmth(self, image: Image.Image, amount: float = 0.1) -> Image.Image:
-        """Add warmth to image by shifting color temperature."""
+        """Shift color temperature. Positive = warmer (more red), negative = cooler (more blue)."""
         import numpy as np
         arr = np.array(image, dtype=np.float32)
 
-        # Warm up: boost red, keep green neutral, minimal blue reduction
+        # Adjust color temperature: positive warms, negative cools
         arr[:, :, 0] = np.clip(arr[:, :, 0] * (1 + amount), 0, 255)      # Red +
         arr[:, :, 1] = np.clip(arr[:, :, 1] * (1 + amount * 0.1), 0, 255) # Green minimal
         arr[:, :, 2] = np.clip(arr[:, :, 2] * (1 - amount * 0.15), 0, 255) # Blue slight -
@@ -263,15 +263,15 @@ class Processor:
                 error = old_pixel - new_pixel
 
                 # Distribute error to neighbors (Floyd-Steinberg coefficients)
-                # 0.55x error spread - smoother, less noisy
+                # 0.3x error spread - much smoother, painterly look
                 if x + 1 < width:
-                    arr[y, x + 1] += error * 7 / 16 * 0.55
+                    arr[y, x + 1] += error * 7 / 16 * 0.3
                 if y + 1 < height:
                     if x > 0:
-                        arr[y + 1, x - 1] += error * 3 / 16 * 0.55
-                    arr[y + 1, x] += error * 5 / 16 * 0.55
+                        arr[y + 1, x - 1] += error * 3 / 16 * 0.3
+                    arr[y + 1, x] += error * 5 / 16 * 0.3
                     if x + 1 < width:
-                        arr[y + 1, x + 1] += error * 1 / 16 * 0.55
+                        arr[y + 1, x + 1] += error * 1 / 16 * 0.3
 
         # Clip and convert
         arr = np.clip(arr, 0, 255).astype(np.uint8)
