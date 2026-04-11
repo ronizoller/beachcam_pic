@@ -105,14 +105,14 @@ class Processor:
         img = self._preprocess(img)
         logger.debug("Applied preprocessing")
 
-        # Step 3: Add overlay BEFORE color reduction (so text gets quantized too)
+        # Step 3: Color reduction with dithering
+        img = self._reduce_colors(img, color_mode, dithering)
+        logger.debug(f"Reduced to {color_mode} palette, dithering={dithering}")
+
+        # Step 4: Add overlay AFTER color reduction (so text stays crisp)
         if overlay_config.get("enabled", True) and weather_data:
             img = self._add_minimal_overlay(img, weather_data, overlay_config)
             logger.debug("Added overlay")
-
-        # Step 4 & 5: Color reduction with dithering
-        img = self._reduce_colors(img, color_mode, dithering)
-        logger.debug(f"Reduced to {color_mode} palette, dithering={dithering}")
 
         return img
 
@@ -286,161 +286,217 @@ class Processor:
         """
         Add minimal, clean text overlay on the image.
 
-        Style: Clean white text with subtle shadow for readability.
-        Format: "Tel Aviv · 0.8m · 12km/h W"
+        Layout (bottom-right aligned):
+            ● 7
+            1.4m@9s
+            ─────────────
+            08:30 · Tel Aviv · 12NW
         """
         img = image.copy()
         draw = ImageDraw.Draw(img)
 
-        # Load fonts
+        # Load fonts - two sizes for hierarchy
         try:
-            font_main = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24)
-        except:
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            font_big = ImageFont.truetype(font_path, 28)
+            font_small = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18
+            )
+        except Exception:
             try:
-                # macOS fonts
-                font_main = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
-            except:
-                font_main = ImageFont.load_default()
+                font_big = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
+                font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 18)
+            except Exception:
+                font_big = ImageFont.load_default()
+                font_small = ImageFont.load_default()
 
-        padding = 25
+        padding = 20
         width, height = img.size
-
-        # Build info line: "08:30 · Tel Aviv · 1.4m@9s · 12km/h ↗"
-        parts = []
-
-        # Add current time
-        parts.append(datetime.now().strftime("%H:%M"))
-
-        location = weather_data.get("location")
-        if location:
-            parts.append(location)
-
-        # Wave: height @ period
-        wave = weather_data.get("wave_height")
-        period = weather_data.get("wave_period")
-        if wave and period:
-            parts.append(f"{wave}@{period}")
-        elif wave:
-            parts.append(wave)
-
-        # Wind: speed (arrow drawn separately)
-        wind_speed = weather_data.get("wind_speed")
-        wind_dir = weather_data.get("wind_direction")
-        if wind_speed:
-            parts.append(wind_speed)
-
-        info_text = " · ".join(parts)
-
-        # Position: bottom-left
-        text_x = padding
-        text_y = height - padding - 28
-
-        # Draw text with shadow/outline for readability on any background
         shadow_color = (0, 0, 0)
         text_color = (255, 255, 255)
 
-        # Draw shadow (multiple offsets for thicker outline)
-        for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (-2, 0), (2, 0), (0, -2), (0, 2)]:
-            draw.text((text_x + dx, text_y + dy), info_text, fill=shadow_color, font=font_main)
+        # --- Build text content ---
 
-        # Draw main text
-        draw.text((text_x, text_y), info_text, fill=text_color, font=font_main)
+        # Primary line: wave height @ period
+        wave = weather_data.get("wave_height")
+        period = weather_data.get("wave_period")
+        if wave and period:
+            primary_text = f"{wave}@{period}"
+        elif wave:
+            primary_text = wave
+        else:
+            primary_text = ""
 
-        # Draw wind arrow after text
-        if wind_dir:
-            # Get text width to position arrow after it
-            try:
-                text_bbox = draw.textbbox((0, 0), info_text, font=font_main)
-                text_width = text_bbox[2] - text_bbox[0]
-            except:
-                text_width = len(info_text) * 12  # Fallback estimate
+        # Secondary line: time · location · wind
+        secondary_parts = []
+        secondary_parts.append(datetime.now().strftime("%H:%M"))
+        location = weather_data.get("location")
+        if location:
+            secondary_parts.append(location)
+        wind_speed = weather_data.get("wind_speed")
+        wind_dir = weather_data.get("wind_direction")
+        if wind_speed:
+            secondary_parts.append(wind_speed)
+        secondary_text = " · ".join(secondary_parts)
 
-            arrow_x = text_x + text_width + 8
-            arrow_y = text_y + 12  # Center vertically with text
-            self._draw_wind_arrow(draw, arrow_x, arrow_y, wind_dir, shadow_color, text_color)
+        # Reserve space for wind arrow after text
+        wind_arrow_space = 18 if wind_dir else 0
 
-        # Draw rating circles in top-right
+        # --- Measure text for right-alignment ---
+        primary_bbox = draw.textbbox((0, 0), primary_text, font=font_big) if primary_text else (0, 0, 0, 0)
+        secondary_bbox = draw.textbbox((0, 0), secondary_text, font=font_small)
+        primary_w = primary_bbox[2] - primary_bbox[0]
+        primary_h = primary_bbox[3] - primary_bbox[1]
+        secondary_text_w = secondary_bbox[2] - secondary_bbox[0]
+        secondary_w = secondary_text_w + wind_arrow_space
+        secondary_h = secondary_bbox[3] - secondary_bbox[1]
+
+        # Line width = widest of primary/secondary
+        line_w = max(primary_w, secondary_w)
+
+        # --- Position everything from bottom-right upward ---
+        line_gap = 8
+        right_edge = width - padding
+
+        # Block width = widest element (secondary line is usually widest)
+        block_w = line_w
+        block_left = right_edge - block_w
+        block_center = block_left + block_w // 2
+
+        # Secondary text (bottommost) — right-aligned (defines block width)
+        secondary_y = height - padding - secondary_h
+        secondary_x = right_edge - secondary_w
+
+        # Horizontal rule — full block width
+        rule_y = secondary_y - line_gap
+
+        # Primary text (above rule) — centered in block
+        primary_y = rule_y - line_gap - primary_h
+        primary_x = block_center - primary_w // 2
+
+        # --- Draw content with outline ---
         rating = weather_data.get("rating")
+
+        # Rating dot + number (above primary text) — centered in block
         if rating is not None:
-            self._draw_rating_circles(draw, width - padding, padding, rating)
+            self._draw_rating_dot(draw, block_center, primary_y - line_gap - 4, rating, font_small)
+
+        # Primary text (wave data, bold)
+        if primary_text:
+            self._draw_text_with_outline(draw, primary_x, primary_y, primary_text, font_big, text_color, shadow_color)
+
+        # Horizontal rule
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            draw.line([(block_left + dx, rule_y + dy), (right_edge + dx, rule_y + dy)], fill=shadow_color, width=1)
+        draw.line([(block_left, rule_y), (right_edge, rule_y)], fill=text_color, width=1)
+
+        # Secondary text (details)
+        self._draw_text_with_outline(draw, secondary_x, secondary_y, secondary_text, font_small, text_color, shadow_color)
+
+        # Wind direction arrow after text
+        if wind_dir and wind_arrow_space:
+            arrow_x = secondary_x + secondary_text_w + 10
+            arrow_y = secondary_y + secondary_h // 2
+            self._draw_wind_arrow(draw, arrow_x, arrow_y, wind_dir, shadow_color, text_color)
 
         return img
 
-    def _draw_rating_circles(self, draw: ImageDraw.Draw, x: int, y: int, rating: int):
-        """Draw rating 1-10 as circles with half-fill support."""
-        num_circles = 5
-        circle_size = 14
-        spacing = 18
-
-        # Rating 1-10: each circle = 2 points, half circle = 1 point
-        # Rating 1 = half of 1st, Rating 2 = full 1st, Rating 3 = full 1st + half 2nd, etc.
-
-        # Draw circles right-to-left from top-right corner
-        for i in range(num_circles):
-            cx = x - (i * spacing) - circle_size // 2
-            cy = y + circle_size // 2
-
-            # Circle bounds
-            x0, y0 = cx - circle_size // 2, cy - circle_size // 2
-            x1, y1 = cx + circle_size // 2, cy + circle_size // 2
-
-            circle_num = num_circles - i  # 5, 4, 3, 2, 1
-            circle_value = circle_num * 2  # Points needed for full circle: 2, 4, 6, 8, 10
-
-            # Black outline
-            draw.ellipse([x0-2, y0-2, x1+2, y1+2], fill=(0, 0, 0))
-
-            if rating >= circle_value:
-                # Full circle: white
-                draw.ellipse([x0, y0, x1, y1], fill=(255, 255, 255))
-            elif rating >= circle_value - 1:
-                # Half circle: left half white, right half black
-                draw.ellipse([x0, y0, x1, y1], fill=(0, 0, 0))
-                # Draw left half using pieslice
-                draw.pieslice([x0, y0, x1, y1], start=90, end=270, fill=(255, 255, 255))
-            else:
-                # Empty: black center
-                draw.ellipse([x0+2, y0+2, x1-2, y1-2], fill=(0, 0, 0))
-
-    def _draw_wind_arrow(self, draw: ImageDraw.Draw, x: int, y: int, direction: str, shadow_color, fill_color):
-        """Draw a simple wind direction arrow."""
+    def _draw_wind_arrow(self, draw: ImageDraw.Draw, x: int, y: int, direction: str, outline_color, fill_color):
+        """Draw a small wind direction arrow with outline."""
         import math
 
-        # Arrow points in direction wind is blowing TO
         angle_map = {
             "N": 180, "NE": 225, "E": 270, "SE": 315,
             "S": 0, "SW": 45, "W": 90, "NW": 135,
         }
 
         angle = math.radians(angle_map.get(direction, 0))
+        size = 7
+        head = 5
 
-        # Simple arrow: line + two angled lines for head
-        size = 10
-        head = 6
-
-        # End points of main line
+        # Arrow line
         x1 = x - size * math.sin(angle)
         y1 = y + size * math.cos(angle)
         x2 = x + size * math.sin(angle)
         y2 = y - size * math.cos(angle)
 
-        # Arrow head lines (two lines from tip at 45 degree angles)
-        head_angle = 0.5  # ~30 degrees
+        # Arrowhead
+        head_angle = 0.5
         hx1 = x2 - head * math.sin(angle - head_angle)
         hy1 = y2 + head * math.cos(angle - head_angle)
         hx2 = x2 - head * math.sin(angle + head_angle)
         hy2 = y2 + head * math.cos(angle + head_angle)
 
-        # Draw with shadow outline
-        for dx, dy in [(-1,0), (1,0), (0,-1), (0,1), (-1,-1), (1,1), (-1,1), (1,-1)]:
-            draw.line([(x1+dx, y1+dy), (x2+dx, y2+dy)], fill=shadow_color, width=3)
-            draw.line([(x2+dx, y2+dy), (hx1+dx, hy1+dy)], fill=shadow_color, width=3)
-            draw.line([(x2+dx, y2+dy), (hx2+dx, hy2+dy)], fill=shadow_color, width=3)
+        # Draw outline
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
+            draw.line([(x1+dx, y1+dy), (x2+dx, y2+dy)], fill=outline_color, width=2)
+            draw.line([(x2+dx, y2+dy), (hx1+dx, hy1+dy)], fill=outline_color, width=2)
+            draw.line([(x2+dx, y2+dy), (hx2+dx, hy2+dy)], fill=outline_color, width=2)
 
-        # Draw white arrow
+        # Draw arrow
         draw.line([(x1, y1), (x2, y2)], fill=fill_color, width=2)
         draw.line([(x2, y2), (hx1, hy1)], fill=fill_color, width=2)
         draw.line([(x2, y2), (hx2, hy2)], fill=fill_color, width=2)
+
+    def _draw_text_with_outline(
+        self, draw: ImageDraw.Draw, x: int, y: int,
+        text: str, font: ImageFont.ImageFont,
+        fill: tuple, outline: tuple, thickness: int = 2,
+    ):
+        """Draw text with a solid outline for readability on any background."""
+        for dx in range(-thickness, thickness + 1):
+            for dy in range(-thickness, thickness + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, y + dy), text, fill=outline, font=font)
+        draw.text((x, y), text, fill=fill, font=font)
+
+    def _draw_rating_dot(
+        self, draw: ImageDraw.Draw, center_x: int, y: int,
+        rating: int, font: ImageFont.ImageFont,
+    ):
+        """Draw colored dot + rating number, centered horizontally."""
+        # Dot color based on rating
+        if rating <= 3:
+            dot_color = (255, 0, 0)       # Red - poor
+        elif rating <= 6:
+            dot_color = (255, 255, 0)     # Yellow - fair
+        else:
+            dot_color = (0, 255, 0)       # Green - good
+
+        rating_text = str(rating)
+        text_bbox = draw.textbbox((0, 0), rating_text, font=font)
+        text_w = text_bbox[2] - text_bbox[0]
+        text_h = text_bbox[3] - text_bbox[1]
+
+        dot_radius = 6
+        dot_gap = 6
+
+        # Total width of dot + gap + number, centered
+        total_w = dot_radius * 2 + dot_gap + text_w
+        start_x = center_x - total_w // 2
+
+        dot_cx = start_x + dot_radius
+        dot_cy = y - text_h // 2
+        text_x = start_x + dot_radius * 2 + dot_gap
+        text_y = y - text_h
+
+        # Draw dot with outline for visibility
+        draw.ellipse(
+            [dot_cx - dot_radius - 2, dot_cy - dot_radius - 2,
+             dot_cx + dot_radius + 2, dot_cy + dot_radius + 2],
+            fill=(0, 0, 0),
+        )
+        draw.ellipse(
+            [dot_cx - dot_radius, dot_cy - dot_radius,
+             dot_cx + dot_radius, dot_cy + dot_radius],
+            fill=dot_color,
+        )
+
+        # Draw number with outline
+        self._draw_text_with_outline(
+            draw, text_x, text_y, rating_text, font,
+            (255, 255, 255), (0, 0, 0),
+        )
 
     def process_and_save(
         self,
@@ -475,7 +531,14 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1:
         img = Image.open(sys.argv[1])
-        result = process_image(img, {"location": "Tel Aviv", "wave_height": "1.2m"})
+        result = process_image(img, {
+            "location": "Tel Aviv",
+            "wave_height": "1.4m",
+            "wave_period": "9s",
+            "wind_speed": "12km/h",
+            "wind_direction": "NW",
+            "rating": 7,
+        })
         result.save("processed_test.bmp")
         print("Saved to processed_test.bmp")
     else:

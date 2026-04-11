@@ -16,8 +16,13 @@ from config import get_config
 logger = logging.getLogger(__name__)
 
 
-def create_app() -> Flask:
-    """Create and configure Flask application."""
+def create_app(on_image_pulled=None, get_sleep_minutes=None) -> Flask:
+    """Create and configure Flask application.
+
+    Args:
+        on_image_pulled: Optional callback invoked when ESP32 pulls /image.
+        get_sleep_minutes: Optional callback returning minutes until next active time.
+    """
     app = Flask(__name__)
     config = get_config()
 
@@ -39,9 +44,13 @@ def create_app() -> Flask:
         """
         Get the current processed image.
         Returns BMP file optimized for E-Ink display.
+        Signals the service to clear candidates for next cycle.
         """
         if not image_path.exists():
             return Response("No image available", status=404)
+
+        if on_image_pulled:
+            on_image_pulled()
 
         return send_file(
             image_path,
@@ -108,6 +117,20 @@ def create_app() -> Flask:
             return Response("No raw image available", status=404)
         return send_file(raw_path, mimetype="image/png")
 
+    @app.route("/sleep")
+    def get_sleep():
+        """
+        Get recommended sleep duration for ESP32.
+        Returns normal interval during active hours,
+        or minutes until next sunrise during night.
+        """
+        default = config.timing.get("esp_sleep_minutes", 30)
+        if get_sleep_minutes:
+            minutes = get_sleep_minutes()
+        else:
+            minutes = default
+        return jsonify({"sleep_minutes": minutes})
+
     return app
 
 
@@ -126,9 +149,9 @@ def _load_metadata(path: Path) -> Optional[dict]:
 class Server:
     """HTTP server for serving images to ESP32."""
 
-    def __init__(self):
+    def __init__(self, on_image_pulled=None, get_sleep_minutes=None):
         self.config = get_config()
-        self.app = create_app()
+        self.app = create_app(on_image_pulled=on_image_pulled, get_sleep_minutes=get_sleep_minutes)
         self._thread: Optional[Thread] = None
 
     def run(self, threaded: bool = False):

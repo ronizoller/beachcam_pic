@@ -17,25 +17,19 @@
 #include <HTTPClient.h>
 #include <GxEPD2_7C.h>  // 7-color e-paper
 #include <Adafruit_GFX.h>
-#include <time.h>
 #include "credentials.h"
 
 // ============== CONFIGURATION ==============
 
 // Pi server address (change to your Pi's IP)
-const char* SERVER_URL = "http://192.168.1.100:8080/image";
+const char* SERVER_BASE = "http://192.168.1.100:8080";
 
-// Deep sleep duration (30 minutes = 1800 seconds)
-#define SLEEP_MINUTES 30
+// Fallback sleep if Pi is unreachable (minutes)
+#define FALLBACK_SLEEP_MINUTES 30
 #define uS_TO_S_FACTOR 1000000ULL
 
 // WiFi timeout (seconds)
 #define WIFI_TIMEOUT 30
-
-// Active hours (skip updates at night to save battery)
-#define ACTIVE_HOUR_START 6   // 6:00 AM
-#define ACTIVE_HOUR_END 20    // 8:00 PM
-#define TIMEZONE_OFFSET 3     // Israel = UTC+3 (adjust for daylight saving)
 
 // ============== E-INK DISPLAY PINS ==============
 // Waveshare 7.3" connected to ESP32 via SPI
@@ -75,15 +69,7 @@ void setup() {
     // Connect to WiFi
     if (!connectWiFi()) {
         Serial.println("WiFi failed, going to sleep...");
-        goToSleep();
-        return;
-    }
-
-    // Sync time and check if within active hours
-    syncTime();
-    if (!isActiveTime()) {
-        Serial.println("Outside active hours, sleeping until morning...");
-        goToSleepUntilMorning();
+        goToSleep(FALLBACK_SLEEP_MINUTES);
         return;
     }
 
@@ -95,12 +81,15 @@ void setup() {
         displayError("Failed to load image");
     }
 
+    // Ask Pi how long to sleep
+    int sleepMinutes = fetchSleepMinutes();
+
     // Disconnect WiFi to save power
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
     // Go to deep sleep
-    goToSleep();
+    goToSleep(sleepMinutes);
 }
 
 void loop() {
@@ -135,10 +124,11 @@ bool connectWiFi() {
 // ============== IMAGE FETCH & DISPLAY ==============
 
 bool fetchAndDisplayImage() {
-    Serial.printf("Fetching image from: %s\n", SERVER_URL);
+    String imageUrl = String(SERVER_BASE) + "/image";
+    Serial.printf("Fetching image from: %s\n", imageUrl.c_str());
 
     HTTPClient http;
-    http.begin(SERVER_URL);
+    http.begin(imageUrl);
     http.setTimeout(30000);  // 30 second timeout
 
     int httpCode = http.GET();
@@ -282,59 +272,47 @@ void displayError(const char* message) {
     } while (display.nextPage());
 }
 
-// ============== TIME & SLEEP ==============
+// ============== SLEEP ==============
 
-void syncTime() {
-    Serial.println("Syncing time via NTP...");
-    configTime(TIMEZONE_OFFSET * 3600, 0, "pool.ntp.org", "time.nist.gov");
+int fetchSleepMinutes() {
+    String sleepUrl = String(SERVER_BASE) + "/sleep";
+    Serial.printf("Fetching sleep duration from: %s\n", sleepUrl.c_str());
 
-    // Wait for time to sync
-    int attempts = 0;
-    while (time(nullptr) < 100000 && attempts < 20) {
-        delay(500);
-        attempts++;
+    HTTPClient http;
+    http.begin(sleepUrl);
+    http.setTimeout(10000);
+
+    int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+
+        // Simple JSON parse: {"sleep_minutes": 30}
+        int idx = payload.indexOf("sleep_minutes");
+        if (idx >= 0) {
+            int colon = payload.indexOf(":", idx);
+            int end = payload.indexOf("}", colon);
+            String value = payload.substring(colon + 1, end);
+            value.trim();
+            int minutes = value.toInt();
+
+            if (minutes > 0) {
+                Serial.printf("Pi says sleep for %d minutes\n", minutes);
+                http.end();
+                return minutes;
+            }
+        }
     }
 
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    Serial.printf("Current time: %02d:%02d\n", timeinfo->tm_hour, timeinfo->tm_min);
+    Serial.printf("Failed to get sleep duration (HTTP %d), using fallback\n", httpCode);
+    http.end();
+    return FALLBACK_SLEEP_MINUTES;
 }
 
-bool isActiveTime() {
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    int hour = timeinfo->tm_hour;
-
-    Serial.printf("Hour: %d (active: %d-%d)\n", hour, ACTIVE_HOUR_START, ACTIVE_HOUR_END);
-    return (hour >= ACTIVE_HOUR_START && hour < ACTIVE_HOUR_END);
-}
-
-void goToSleepUntilMorning() {
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-    int hour = timeinfo->tm_hour;
-    int minute = timeinfo->tm_min;
-
-    // Calculate minutes until ACTIVE_HOUR_START
-    int minutesUntilMorning;
-    if (hour >= ACTIVE_HOUR_END) {
-        // Evening: sleep until next morning
-        minutesUntilMorning = (24 - hour + ACTIVE_HOUR_START) * 60 - minute;
-    } else {
-        // Early morning: sleep until start hour
-        minutesUntilMorning = (ACTIVE_HOUR_START - hour) * 60 - minute;
-    }
-
-    Serial.printf("Sleeping for %d minutes until %d:00\n", minutesUntilMorning, ACTIVE_HOUR_START);
-
-    esp_sleep_enable_timer_wakeup(minutesUntilMorning * 60 * uS_TO_S_FACTOR);
-    esp_deep_sleep_start();
-}
-
-void goToSleep() {
-    Serial.printf("\nGoing to deep sleep for %d minutes...\n", SLEEP_MINUTES);
+void goToSleep(int minutes) {
+    Serial.printf("\nGoing to deep sleep for %d minutes...\n", minutes);
     Serial.println("Goodnight!\n");
 
-    esp_sleep_enable_timer_wakeup(SLEEP_MINUTES * 60 * uS_TO_S_FACTOR);
+    esp_sleep_enable_timer_wakeup((uint64_t)minutes * 60 * uS_TO_S_FACTOR);
     esp_deep_sleep_start();
 }

@@ -83,51 +83,62 @@ class SurfConditions:
             ratio = wave_cm / prefs.min_wave_cm
             score += 5.0 * ratio * 0.5  # Max 2.5 if just under
         else:
-            # Too big - score decreases as it gets bigger
-            ratio = prefs.max_wave_cm / wave_cm
-            score += 5.0 * ratio * 0.6  # Some points for big waves
+            # Too big - gentle falloff near max, steeper further out
+            over_pct = (wave_cm - prefs.max_wave_cm) / prefs.max_wave_cm
+            # 10% over → ~4.5, 30% over → ~3.5, 50%+ over → ~2.5
+            score += 5.0 * max(0.4, 1.0 - over_pct * 2.0)
 
         # Wave period score (0-2 points)
         # Longer period = cleaner waves
+        # Tuned for Mediterranean (Tel Aviv): 10s+ is great, 7s+ is good
         if self.wave_period:
-            if self.wave_period >= 12:
+            if self.wave_period >= 10:
                 score += 2.0
-            elif self.wave_period >= 8:
-                score += 1.5
             elif self.wave_period >= 5:
-                score += 1.0
+                # Smooth gradient: 5s → 1.0, 10s → 2.0
+                score += 1.0 + (self.wave_period - 5) * 0.2
             else:
-                score += 0.5
+                # Below 5s: choppy
+                score += max(0.0, self.wave_period / 5.0 * 1.0)
 
-        # Wind speed score (0-2 points)
-        # Lower wind = better conditions
+        # Combined wind score (0-3 points)
+        # Direction only matters when wind is strong enough to feel
         if self.wind_speed is not None:
-            if self.wind_speed <= 5:
-                score += 2.0  # Glass-off conditions
-            elif self.wind_speed <= 10:
-                score += 1.5
-            elif self.wind_speed <= 15:
-                score += 1.0
-            elif self.wind_speed <= 20:
-                score += 0.5
-            # Above 20 = no bonus
+            # Classify direction: offshore, cross, or onshore
+            wind_type = "cross"  # default if no direction data
+            if self.wind_direction is not None:
+                offshore_dir = (prefs.beach_facing + 180) % 360
+                angle_diff = abs(self.wind_direction - offshore_dir)
+                if angle_diff > 180:
+                    angle_diff = 360 - angle_diff
+                if angle_diff <= 60:
+                    wind_type = "offshore"
+                elif angle_diff >= 120:
+                    wind_type = "onshore"
 
-        # Wind direction score (0-1 point)
-        # Offshore = best, onshore = worst
-        if self.wind_direction is not None and self.wind_speed and self.wind_speed > 5:
-            # Calculate offshore direction (opposite of beach facing)
-            offshore_dir = (prefs.beach_facing + 180) % 360
-            # Angle difference between wind and offshore
-            angle_diff = abs(self.wind_direction - offshore_dir)
-            if angle_diff > 180:
-                angle_diff = 360 - angle_diff
-            # 0° diff = perfect offshore, 180° = onshore
-            if angle_diff <= 45:
-                score += 1.0  # Offshore
-            elif angle_diff <= 90:
-                score += 0.5  # Side-offshore
-            elif angle_diff >= 135:
-                score -= 0.5  # Onshore penalty
+            if self.wind_speed <= 5:
+                score += 3.0  # Glass, direction irrelevant
+            elif self.wind_speed <= 10:
+                if wind_type == "offshore":
+                    score += 2.5
+                elif wind_type == "cross":
+                    score += 2.0
+                else:
+                    score += 1.5  # Light onshore
+            elif self.wind_speed <= 20:
+                if wind_type == "offshore":
+                    score += 2.0
+                elif wind_type == "cross":
+                    score += 1.5
+                else:
+                    score += 1.0  # Onshore
+            else:
+                # 20+ km/h — direction matters a lot
+                if wind_type == "offshore":
+                    score += 1.0
+                elif wind_type == "cross":
+                    score += 0.5
+                # Onshore 20+ = 0 points
 
         # Round and clamp to 1-10
         rating = max(1, min(10, round(score)))

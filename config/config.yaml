@@ -8,6 +8,7 @@ cameras:
     enabled: true
     priority: 1
     type: "snapshot"
+    scoring_profile: "jaffa"
     # Crop out the "(c)BeachCam Israel" watermark at the top
     # Format: [left, top, right, bottom]
     crop_box: [0, 80, 1920, 1080]
@@ -41,13 +42,14 @@ timing:
   active_hours:
     enabled: true
     start: "06:00"
-    end: "20:00"
+    end: "20:00"  # Fallback if sunset API unavailable
     timezone: "Asia/Jerusalem"
+    # End time is automatically set to sunset (fetched daily from Open-Meteo)
 
 # ========== DISPLAY (E-Ink) ==========
 display:
-  width: 800
-  height: 480
+  width: 1600
+  height: 1200
   # Color modes: "7color", "6color", "5color", "3color", "bw"
   color_mode: "6color"
   # Dithering: true = detail with some noise, false = flat/posterized
@@ -80,6 +82,33 @@ weather:
     lat: 32.0853
     lon: 34.7818
     name: "Tel Aviv"
+
+# ========== GUEST BEACHES ==========
+# Once per day, at a random time, show a different beach
+guest_beaches:
+  enabled: true
+  cameras:
+    - name: "Baleal"
+      url: "https://images.webcamgalore.com/webcam-baleal-0-{hour}-27738-full.jpg"
+      type: "snapshot"
+      crop_box: [0, 80, 1920, 1080]  # Remove MEO BEACHCAM watermark
+      dynamic_url: true  # {hour} is replaced with current local hour
+      timezone: "Europe/Lisbon"
+      scoring_profile: "beach"
+      location:
+        lat: 39.3725
+        lon: -9.3394
+        name: "Baleal"
+    - name: "Dahab"
+      url: "https://webcam.harry-nass.com/dahab-live.jpg"
+      type: "snapshot"
+      crop_box: [0, 0, 2688, 1480]  # Remove watermark at bottom
+      timezone: "Africa/Cairo"
+      scoring_profile: "beach"
+      location:
+        lat: 28.5007
+        lon: 34.5133
+        name: "Dahab"
 
 # ========== AD DETECTION ==========
 filter:

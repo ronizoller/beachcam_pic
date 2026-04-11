@@ -1,4 +1,4 @@
-# Surf E-Ink Frame - Software Architecture
+a# Surf E-Ink Frame - Software Architecture
 
 Simple overview of how the system works.
 
@@ -8,6 +8,8 @@ Simple overview of how the system works.
 
 ### 1. Raspberry Pi (always on, wall powered)
 - Fetches beach camera images every 5 minutes
+- Scores each frame for composition quality (sea/beach/buildings ratio)
+- Keeps the best frame from each collection cycle
 - Filters out ads and bad frames
 - Processes image for E-Ink display
 - Serves image via HTTP on port 8080
@@ -27,17 +29,26 @@ Simple overview of how the system works.
 Beach Camera (internet)
        |
        v
-   fetcher.py      <- downloads raw JPEG
+   fetcher.py      <- downloads raw frame
        |
        v
-   filter.py       <- rejects ads/bad frames
+   cropper.py      <- removes watermarks/borders
+       |
+       v
+   filter.py       <- checks for ads/bad frames
+       |
+       v
+   scorer.py       <- scores composition (sea/beach/buildings)
+       |
+       v
+   candidates/     <- accumulates frames, keeps best
        |
        v
    processor.py    <- resize, dither, add overlay
        |
        v
    server.py       <- serves /image, /hash, /metadata
-       |
+       |                (clears candidates when ESP32 pulls)
        v
    ESP32           <- fetches over WiFi
        |
@@ -51,12 +62,15 @@ Beach Camera (internet)
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Entry point, runs the loop |
+| `main.py` | Entry point, orchestrates pipeline and candidate selection |
 | `fetcher.py` | Downloads frames from camera URL |
-| `filter.py` | Detects ads, rejects bad frames |
+| `cropper.py` | Crops out watermarks and borders |
+| `filter.py` | Detects ads, checks frame quality |
+| `scorer.py` | Scores frame composition (sea/beach/buildings ratio) |
 | `processor.py` | Resizes, dithers, adds overlay |
 | `server.py` | HTTP server for ESP32 to fetch from |
 | `surf_data.py` | Gets wave/wind data from weather API |
+| `config.py` | Loads and provides access to config.yaml |
 
 ---
 
@@ -101,13 +115,26 @@ If rejected, keeps the last known good frame.
 
 ---
 
+## Frame Selection
+
+The camera moves, so frame composition varies. The Pi collects
+candidates between ESP32 wakes and picks the best one:
+
+1. Each fetch cycle: fetch → crop → filter → **score** → save to `candidates/`
+2. Score is based on color classification (sea/sky, beach, buildings)
+3. Ideal frame: ~60% sea/sky, ~15% beach, ~25% buildings
+4. Best-scoring candidate is processed and served as `current.bmp`
+5. When ESP32 pulls `/image`, candidates are cleared for next cycle
+
+---
+
 ## Image Processing Pipeline
 
 1. **Crop** - Remove camera site borders/watermarks
 2. **Resize** - Scale to 800x480 for display
 3. **Color reduce** - Map to 6-color E-Ink palette
 4. **Dither** - Floyd-Steinberg for smooth gradients
-5. **Overlay** - Add location, wave height, wind info
+5. **Overlay** - Wave height (bold), horizontal rule, time/location/wind (smaller)
 
 ---
 
@@ -115,11 +142,14 @@ If rejected, keeps the last known good frame.
 
 | Endpoint | Returns |
 |----------|---------|
-| `GET /image` | Current processed BMP image |
-| `GET /hash` | MD5 hash of current image |
-| `GET /metadata` | JSON with conditions, timestamp |
+| `GET /image` | Current processed BMP (clears candidates) |
+| `GET /hash` | Hash + timestamp of current image |
+| `GET /metadata` | JSON with conditions, score, timestamp |
+| `GET /preview` | PNG version for browser viewing |
+| `GET /raw` | Original unprocessed frame |
 
 ESP32 checks `/hash` first to avoid downloading unchanged images.
+Pulling `/image` signals the Pi to start a fresh candidate collection.
 
 ---
 
@@ -132,18 +162,22 @@ beachcam_pic/
 ├── pi/
 │   ├── main.py          <- run this
 │   ├── fetcher.py
+│   ├── cropper.py
 │   ├── filter.py
+│   ├── scorer.py        <- frame composition scoring
 │   ├── processor.py
 │   ├── server.py
-│   └── surf_data.py
+│   ├── surf_data.py
+│   ├── config.py
+│   └── data/
+│       ├── current.bmp      <- processed best image
+│       ├── current_raw.png  <- latest raw from camera
+│       ├── metadata.json
+│       └── candidates/      <- scored frames (cleared on pull)
 ├── esp32/
 │   └── surf_frame/
 │       ├── surf_frame.ino
 │       └── credentials.h
-├── data/
-│   ├── current.bmp      <- processed image
-│   ├── current_raw.png  <- original from camera
-│   └── metadata.json
 └── docs/
     ├── architecture.md  <- this file
     └── hardware_diagram.md
