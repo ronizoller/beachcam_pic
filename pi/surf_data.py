@@ -72,11 +72,10 @@ class SurfConditions:
         # Wave height score (0-5 points)
         # Perfect score if within preferred range
         if prefs.min_wave_cm <= wave_cm <= prefs.max_wave_cm:
-            # Calculate how centered in the range (peak at middle)
-            range_mid = (prefs.min_wave_cm + prefs.max_wave_cm) / 2
-            range_span = (prefs.max_wave_cm - prefs.min_wave_cm) / 2
-            distance_from_mid = abs(wave_cm - range_mid)
-            wave_score = 5.0 * (1 - distance_from_mid / range_span * 0.3)
+            # Skewed: bigger waves in range score higher
+            # min → 3.5, max → 5.0
+            position = (wave_cm - prefs.min_wave_cm) / (prefs.max_wave_cm - prefs.min_wave_cm)
+            wave_score = 3.5 + position * 1.5
             score += wave_score
         elif wave_cm < prefs.min_wave_cm:
             # Too small - score decreases as it gets smaller

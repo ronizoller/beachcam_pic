@@ -9,6 +9,9 @@ cameras:
     priority: 1
     type: "snapshot"
     scoring_profile: "jaffa"
+    processing:
+      blur: 1.1
+      dither_strength: 0.3
     # Crop out the "(c)BeachCam Israel" watermark at the top
     # Format: [left, top, right, bottom]
     crop_box: [0, 80, 1920, 1080]
@@ -69,7 +72,7 @@ overlay:
 # ========== SURF PREFERENCES ==========
 # Used to calculate surf quality rating
 surf_preferences:
-  min_wave_cm: 60   # Your minimum preferred wave height
+  min_wave_cm: 75   # Your minimum preferred wave height
   max_wave_cm: 110  # Your maximum preferred wave height
   max_wind_kmh: 25  # Maximum acceptable wind speed
 
@@ -88,27 +91,50 @@ weather:
 guest_beaches:
   enabled: true
   cameras:
-    - name: "Baleal"
-      url: "https://images.webcamgalore.com/webcam-baleal-0-{hour}-27738-full.jpg"
-      type: "snapshot"
-      crop_box: [0, 80, 1920, 1080]  # Remove MEO BEACHCAM watermark
-      dynamic_url: true  # {hour} is replaced with current local hour
+    # --- Verified live ---
+    - name: "Supertubos"
+      url: "https://video-auth1.iol.pt/beachcam/supertubos/playlist.m3u8"
+      type: "hls"
+      crop_box: [0, 50, 1920, 1080]  # Remove MEO BEACHCAM watermark
+      rotation: 4.5
       timezone: "Europe/Lisbon"
+      processing:
+        blur: 1.2
+        saturation: 1.0
+        contrast: 1.1
+        brightness: 1.1
+        sky_tint: true
       scoring_profile: "beach"
       location:
-        lat: 39.3725
-        lon: -9.3394
-        name: "Baleal"
+        lat: 39.3483
+        lon: -9.3592
+        name: "Supertubos"
     - name: "Dahab"
       url: "https://webcam.harry-nass.com/dahab-live.jpg"
       type: "snapshot"
       crop_box: [0, 0, 2688, 1480]  # Remove watermark at bottom
       timezone: "Africa/Cairo"
+      processing:
+        blur: 1.5
+        saturation: 1.2
+        contrast: 1.1
+        brightness: 0.75
+        tint_whites: true
       scoring_profile: "beach"
       location:
         lat: 28.5007
         lon: 34.5133
         name: "Dahab"
+    - name: "Niagara Falls"
+      url: "https://images-webcams.windy.com/91/1240237991/current/full/1240237991.jpg"
+      type: "snapshot"
+      crop_box: null
+      timezone: "America/New_York"
+      scoring_profile: "beach"
+      location:
+        lat: 43.0896
+        lon: -79.0849
+        name: "Niagara Falls"
 
 # ========== AD DETECTION ==========
 filter:

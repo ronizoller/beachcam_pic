@@ -82,6 +82,8 @@ class Fetcher:
         # Route to appropriate fetcher based on camera type
         if camera_type == "snapshot":
             return self._fetch_snapshot(camera)
+        elif camera_type == "hls":
+            return self._fetch_hls(camera)
         else:
             return self._fetch_webrtc(camera)
 
@@ -132,6 +134,62 @@ class Fetcher:
 
         except Exception as e:
             logger.error(f"Failed to fetch snapshot from {camera_name}: {e}")
+            return FetchResult(success=False, camera_name=camera_name, error=str(e))
+
+    def _fetch_hls(self, camera: dict) -> FetchResult:
+        """Extract a single frame from an HLS video stream using ffmpeg."""
+        import subprocess
+
+        camera_name = camera.get("name", "Unknown")
+        url = camera.get("url")
+
+        if not url:
+            return FetchResult(success=False, error=f"No URL for camera {camera_name}")
+
+        logger.info(f"Fetching HLS frame from: {camera_name}")
+
+        try:
+            output_dir = Path(self.config.paths.get("data_dir", "./data"))
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now()
+            raw_path = output_dir / "current_raw.png"
+
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", url,
+                    "-frames:v", "1",
+                    "-q:v", "2",
+                    "-update", "1",
+                    str(raw_path),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+
+            if result.returncode != 0 or not raw_path.exists():
+                error = result.stderr.decode()[-200:] if result.stderr else "Unknown error"
+                logger.error(f"ffmpeg failed: {error}")
+                return FetchResult(success=False, camera_name=camera_name, error=f"ffmpeg failed: {error}")
+
+            logger.info(f"HLS frame saved: {raw_path}")
+
+            return FetchResult(
+                success=True,
+                image_path=str(raw_path),
+                camera_name=camera_name,
+                timestamp=timestamp,
+            )
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"ffmpeg timed out for {camera_name}")
+            return FetchResult(success=False, camera_name=camera_name, error="ffmpeg timeout")
+        except FileNotFoundError:
+            logger.error("ffmpeg not found — install with: sudo apt install ffmpeg")
+            return FetchResult(success=False, camera_name=camera_name, error="ffmpeg not installed")
+        except Exception as e:
+            logger.error(f"Failed to fetch HLS from {camera_name}: {e}")
             return FetchResult(success=False, camera_name=camera_name, error=str(e))
 
     def _fetch_webrtc(self, camera: dict) -> FetchResult:

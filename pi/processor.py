@@ -70,6 +70,7 @@ class Processor:
         self,
         image: Image.Image,
         weather_data: dict = None,
+        processing: dict = None,
     ) -> Image.Image:
         """
         Process image for E-Ink display.
@@ -77,37 +78,50 @@ class Processor:
         Pipeline:
         1. Resize to display dimensions
         2. Preprocess (blur, saturation, contrast)
-        3. Add overlay text
-        4. Color reduction to palette
-        5. Optional dithering
+        3. Color reduction to palette
+        4. Add overlay text
 
         Args:
             image: Input PIL Image.
             weather_data: Optional dict with weather info for overlay.
+            processing: Optional per-camera processing params (blur, dither_strength).
 
         Returns:
             Processed PIL Image ready for E-Ink.
         """
         display = self.config.display
         overlay_config = self.config.overlay
+        proc = processing or {}
 
         # Get settings
         width = display.get("width", 800)
         height = display.get("height", 480)
         color_mode = display.get("color_mode", "7color")
-        dithering = display.get("dithering", True)  # Default ON for detail
+        dithering = display.get("dithering", True)
+
+        blur_radius = proc.get("blur", 1.1)
+        saturation = proc.get("saturation", 0.9)
+        contrast = proc.get("contrast", 0.85)
+        brightness = proc.get("brightness", 1.0)
+        tint_whites = proc.get("tint_whites", False)
+        sky_tint = proc.get("sky_tint", False)
 
         # Step 1: Resize
         img = self._resize(image, width, height)
         logger.debug(f"Resized to {width}x{height}")
 
-        # Step 2: Preprocess for smoother appearance
-        img = self._preprocess(img)
-        logger.debug("Applied preprocessing")
+        # Step 2: Preprocess
+        img = self._preprocess(img, blur_radius=blur_radius, saturation=saturation,
+                               contrast=contrast, brightness=brightness,
+                               tint_whites=tint_whites, sky_tint=sky_tint)
+        logger.debug(f"Applied preprocessing (blur={blur_radius}, sat={saturation}, contrast={contrast}, brightness={brightness})")
 
-        # Step 3: Color reduction with dithering
+        # Step 3: Color reduction with PIL dithering
+        import time as _time
+        t0 = _time.time()
         img = self._reduce_colors(img, color_mode, dithering)
-        logger.debug(f"Reduced to {color_mode} palette, dithering={dithering}")
+        dt = _time.time() - t0
+        logger.info(f"Dithering: {color_mode} palette, method=PIL, time={dt:.2f}s")
 
         # Step 4: Add overlay AFTER color reduction (so text stays crisp)
         if overlay_config.get("enabled", True) and weather_data:
@@ -116,31 +130,87 @@ class Processor:
 
         return img
 
-    def _preprocess(self, image: Image.Image) -> Image.Image:
+    def _preprocess(self, image: Image.Image, blur_radius: float = 1.1,
+                     saturation: float = 0.9, contrast: float = 0.85,
+                     brightness: float = 1.0, tint_whites: bool = False,
+                     sky_tint: bool = False) -> Image.Image:
         """
         Preprocess image for cleaner E-Ink output.
-
-        - Very light blur to reduce camera noise (not too much!)
-        - Slight saturation reduction for muted tones
-        - Contrast boost for better definition
         """
         img = image.convert("RGB")
 
-        # 1. Moderate blur - smooth noise while keeping structure
-        img = img.filter(ImageFilter.GaussianBlur(radius=1.1))
+        # 1. Blur
+        img = img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
-        # 2. Reduce saturation slightly (0.9 = 90% of original)
-        saturation_enhancer = ImageEnhance.Color(img)
-        img = saturation_enhancer.enhance(0.9)
+        # 2. Saturation
+        img = ImageEnhance.Color(img).enhance(saturation)
 
-        # 3. Compress dynamic range (bring darks up, brights down)
-        contrast_enhancer = ImageEnhance.Contrast(img)
-        img = contrast_enhancer.enhance(0.85)
+        # 3. Contrast
+        img = ImageEnhance.Contrast(img).enhance(contrast)
+
+        # 4. Brightness
+        if brightness != 1.0:
+            img = ImageEnhance.Brightness(img).enhance(brightness)
 
         # 5. Neutral color temperature
         img = self._add_warmth(img, 0.05)
 
+        # 6. Tint white pixels toward pink (for cameras with pink tint)
+        if tint_whites:
+            arr = np.array(img, dtype=np.float32)
+            bright = arr.mean(axis=2) > 180
+            arr[bright, 0] = np.clip(arr[bright, 0] * 1.05, 0, 255)
+            arr[bright, 1] = arr[bright, 1] * 0.85
+            arr[bright, 2] = arr[bright, 2] * 0.9
+            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+
+        # 7. Sky tint — darken and blue-shift upper 45% of image
+        if sky_tint:
+            arr = np.array(img, dtype=np.float32)
+            sky_h = int(arr.shape[0] * 0.45)
+            sky = arr[:sky_h]
+            bright = sky.mean(axis=2) > 170
+            sky[bright, 2] = np.clip(sky[bright, 2] * 1.15, 0, 255)
+            sky[bright, 0] = sky[bright, 0] * 0.9
+            sky[bright, 1] = sky[bright, 1] * 0.9
+            arr[:sky_h] = sky * 0.9
+            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+
+        # 8. Push grays toward palette colors (only if saturation > 1)
+        if saturation > 1.0:
+            img = self._push_grays_to_palette(img)
+
         return img
+
+    def _push_grays_to_palette(self, image: Image.Image) -> Image.Image:
+        """
+        Push desaturated (gray) pixels toward nearby palette colors.
+        Gray sky → blue tint, gray sand → yellow tint, dark gray → stays dark.
+        This helps the 6-color dithering produce cleaner results.
+        """
+        arr = np.array(image, dtype=np.float32)
+        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+
+        # Detect gray pixels: low saturation (channels are similar)
+        max_c = np.maximum(np.maximum(r, g), b)
+        min_c = np.minimum(np.minimum(r, g), b)
+        saturation = np.where(max_c > 0, (max_c - min_c) / max_c, 0)
+        brightness = (r + g + b) / 3
+
+        # Gray mask: low saturation, not too dark, not too bright
+        is_gray = (saturation < 0.15) & (brightness > 40) & (brightness < 220)
+
+        # Push bright grays (sky) toward blue
+        bright_gray = is_gray & (brightness > 120)
+        arr[bright_gray, 2] = np.clip(arr[bright_gray, 2] * 1.3, 0, 255)  # Boost blue
+        arr[bright_gray, 0] = arr[bright_gray, 0] * 0.85  # Reduce red
+
+        # Push mid grays (buildings/land) toward warm tone
+        mid_gray = is_gray & (brightness >= 60) & (brightness <= 120)
+        arr[mid_gray, 0] = np.clip(arr[mid_gray, 0] * 1.1, 0, 255)  # Slight red
+        arr[mid_gray, 1] = np.clip(arr[mid_gray, 1] * 1.05, 0, 255)  # Slight green
+
+        return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
     def _add_warmth(self, image: Image.Image, amount: float = 0.1) -> Image.Image:
         """Shift color temperature. Positive = warmer (more red), negative = cooler (more blue)."""
@@ -178,104 +248,29 @@ class Processor:
         return img
 
     def _reduce_colors(
-        self, image: Image.Image, color_mode: str, dithering: bool
+        self, image: Image.Image, color_mode: str, dithering: bool,
     ) -> Image.Image:
-        """Reduce image colors to E-Ink palette."""
+        """Reduce image colors to E-Ink palette using PIL's built-in dithering."""
         palette = PALETTES.get(color_mode, PALETTES["5color"])
-        logger.debug(f"Using {len(palette)}-color palette, dithering={dithering}")
 
         if dithering:
-            return self._floyd_steinberg_dither(image, palette)
+            pal_img = Image.new('P', (1, 1))
+            flat_pal = [c for rgb in palette for c in rgb] + [0] * (768 - len(palette) * 3)
+            pal_img.putpalette(flat_pal)
+            quantized = image.quantize(colors=len(palette), palette=pal_img, dither=1)
+            return quantized.convert('RGB')
         else:
             return self._nearest_color(image, palette)
-
-    def _perceptual_distance(self, pixels: np.ndarray, palette: np.ndarray) -> np.ndarray:
-        """
-        Calculate perceptual color distance using weighted RGB.
-        Better approximates human vision than simple Euclidean distance.
-        Prevents brown from matching blue, etc.
-        """
-        # Weighted RGB distance formula (approximates human perception)
-        # Weight: R=0.3, G=0.59, B=0.11 (luminance-based)
-        # But also penalize hue shifts more
-        diff = pixels[:, np.newaxis, :] - palette[np.newaxis, :, :]
-
-        # Weights that emphasize hue differences
-        # Blue heavily weighted to ensure ocean/sky stays blue
-        weights = np.array([3.0, 3.0, 5.0])
-
-        weighted_diff = diff * weights
-        distances = np.sum(weighted_diff ** 2, axis=2)
-
-        return distances
 
     def _nearest_color(
         self, image: Image.Image, palette: List[Tuple[int, int, int]]
     ) -> Image.Image:
-        """
-        Nearest-color mapping using perceptual distance.
-        Produces smooth look while keeping colors accurate.
-        """
-        arr = np.array(image, dtype=np.float32)
-        palette_arr = np.array(palette, dtype=np.float32)
-
-        # Reshape for efficient distance calculation
-        h, w = arr.shape[:2]
-        pixels = arr.reshape(-1, 3)
-
-        # Use perceptual distance
-        distances = self._perceptual_distance(pixels, palette_arr)
-
-        # Find nearest palette color for each pixel
-        nearest_indices = np.argmin(distances, axis=1)
-        result = palette_arr[nearest_indices].reshape(h, w, 3).astype(np.uint8)
-
-        return Image.fromarray(result)
-
-    def _floyd_steinberg_dither(
-        self, image: Image.Image, palette: List[Tuple[int, int, int]]
-    ) -> Image.Image:
-        """
-        Apply Floyd-Steinberg dithering with perceptual color matching.
-        Uses weighted RGB distance to prevent color bleeding.
-        """
-        arr = np.array(image, dtype=np.float32)
-        height, width = arr.shape[:2]
-        palette_arr = np.array(palette, dtype=np.float32)
-
-        # Perceptual weights - blue heavily weighted for ocean/sky
-        weights = np.array([3.0, 3.0, 5.0])
-
-        for y in range(height):
-            for x in range(width):
-                old_pixel = arr[y, x].copy()
-
-                # Find nearest color using perceptual distance
-                diff = palette_arr - old_pixel
-                weighted_diff = diff * weights
-                distances = np.sum(weighted_diff ** 2, axis=1)
-                nearest_idx = np.argmin(distances)
-                new_pixel = palette_arr[nearest_idx]
-
-                arr[y, x] = new_pixel
-
-                # Calculate quantization error
-                error = old_pixel - new_pixel
-
-                # Distribute error to neighbors (Floyd-Steinberg coefficients)
-                # 0.3x error spread - much smoother, painterly look
-                if x + 1 < width:
-                    arr[y, x + 1] += error * 7 / 16 * 0.3
-                if y + 1 < height:
-                    if x > 0:
-                        arr[y + 1, x - 1] += error * 3 / 16 * 0.3
-                    arr[y + 1, x] += error * 5 / 16 * 0.3
-                    if x + 1 < width:
-                        arr[y + 1, x + 1] += error * 1 / 16 * 0.3
-
-        # Clip and convert
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-        return Image.fromarray(arr)
+        """Nearest-color mapping without dithering (posterized look)."""
+        pal_img = Image.new('P', (1, 1))
+        flat_pal = [c for rgb in palette for c in rgb] + [0] * (768 - len(palette) * 3)
+        pal_img.putpalette(flat_pal)
+        quantized = image.quantize(colors=len(palette), palette=pal_img, dither=0)
+        return quantized.convert('RGB')
 
     def _add_minimal_overlay(
         self,

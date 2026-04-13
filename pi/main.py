@@ -82,6 +82,9 @@ class BeachCamService:
         self.candidates_dir = self.data_dir / "candidates"
         self.candidates_dir.mkdir(parents=True, exist_ok=True)
 
+        # Schedule guest beach for today
+        self._schedule_guest()
+
     def fetch_and_process(self) -> bool:
         """
         Unified pipeline for every cycle:
@@ -159,6 +162,21 @@ class BeachCamService:
                 logger.error("Crop failed, using raw image")
                 cropped_img = raw_img
 
+        # --- Step 2b: Rotation (level tilted cameras) ---
+        rotation = camera.get("rotation") if is_guest else None
+        if not rotation:
+            main_camera = self.config.cameras[0] if self.config.cameras else {}
+            rotation = main_camera.get("rotation") if not is_guest else None
+        if rotation:
+            # Positive = counter-clockwise in PIL
+            cropped_img = cropped_img.rotate(rotation, expand=True, fillcolor=(0, 0, 0))
+            # Crop out black borders — margin ~1.5x the angle percentage
+            w, h = cropped_img.size
+            margin = int(max(w, h) * abs(rotation) * 1.5 / 100)
+            cropped_img = cropped_img.crop((margin, margin, w - margin, h - margin))
+            logger.debug(f"Rotated {rotation}° and trimmed borders")
+            logger.debug(f"Rotated {rotation}° and trimmed borders")
+
         # --- Step 3: Color correction ---
         cropped_img = self._auto_color_correct(cropped_img)
 
@@ -212,7 +230,12 @@ class BeachCamService:
             weather_data = self._get_weather_data()
 
         # --- Step 8: Process for E-Ink (resize, preprocess, dither, overlay) ---
-        processed_img = self.processor.process(best_img, weather_data)
+        if best.get("guest") and best.get("guest_camera"):
+            processing = best["guest_camera"].get("processing")
+        else:
+            main_camera = self.config.cameras[0] if self.config.cameras else {}
+            processing = main_camera.get("processing")
+        processed_img = self.processor.process(best_img, weather_data, processing=processing)
 
         # --- Step 9: Save ---
         output_path = self.data_dir / "current.bmp"
@@ -237,12 +260,51 @@ class BeachCamService:
         logger.info("Pipeline complete!")
         return True
 
-    def _is_guest_cycle(self) -> bool:
-        """Check if this cycle should show a guest beach.
+    def _schedule_guest(self):
+        """Pick a random trigger time for today's guest beach."""
+        guest_config = self.config.get("guest_beaches", default={})
+        if not guest_config.get("enabled", False):
+            logger.info("Guest beaches disabled")
+            return
 
-        Picks a random ESP32 wake slot during the day. At that time,
-        chooses a guest camera that's currently in daytime.
-        """
+        cameras = [c for c in guest_config.get("cameras", []) if c.get("url")]
+        if not cameras:
+            logger.info("No guest cameras configured")
+            return
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._guest_today and self._guest_today.get("date") == today:
+            return  # Already scheduled
+
+        active_hours = self.config.timing.get("active_hours", {})
+        sun_times = self._get_sun_times()
+        start_str = sun_times.get("sunrise") or active_hours.get("start", "06:00")
+        end_str = sun_times.get("sunset") or active_hours.get("end", "20:00")
+
+        start_h, start_m = map(int, start_str.split(":"))
+        end_h, end_m = map(int, end_str.split(":"))
+
+        start_minutes = start_h * 60 + start_m
+        end_minutes = end_h * 60 + end_m
+        esp_interval = self.config.timing.get("esp_sleep_minutes", 30)
+
+        wake_times = list(range(start_minutes, end_minutes, esp_interval))
+        if not wake_times:
+            return
+
+        trigger_time = random.choice(wake_times)
+        self._guest_today = {
+            "date": today,
+            "trigger_minutes": trigger_time,
+            "camera": None,
+        }
+        logger.info(
+            f"Guest beach scheduled at {trigger_time // 60:02d}:{trigger_time % 60:02d} "
+            f"(available: {', '.join(c['name'] for c in cameras)})"
+        )
+
+    def _is_guest_cycle(self) -> bool:
+        """Check if this cycle should show a guest beach."""
         guest_config = self.config.get("guest_beaches", default={})
         if not guest_config.get("enabled", False):
             return False
@@ -253,39 +315,11 @@ class BeachCamService:
 
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Already shown guest today
         if self._guest_used_today == today:
             return False
 
-        # Pick a random trigger time for today (aligned to ESP32 wake interval)
-        if self._guest_today is None or self._guest_today.get("date") != today:
-            active_hours = self.config.timing.get("active_hours", {})
-            sun_times = self._get_sun_times()
-            start_str = sun_times.get("sunrise") or active_hours.get("start", "06:00")
-            end_str = sun_times.get("sunset") or active_hours.get("end", "20:00")
-
-            start_h, start_m = map(int, start_str.split(":"))
-            end_h, end_m = map(int, end_str.split(":"))
-
-            # Total active minutes
-            start_minutes = start_h * 60 + start_m
-            end_minutes = end_h * 60 + end_m
-            esp_interval = self.config.timing.get("esp_sleep_minutes", 30)
-
-            # Build list of ESP32 wake times (minutes from midnight)
-            wake_times = list(range(start_minutes, end_minutes, esp_interval))
-            if not wake_times:
-                return False
-
-            trigger_time = random.choice(wake_times)
-            self._guest_today = {
-                "date": today,
-                "trigger_minutes": trigger_time,
-                "camera": None,  # Picked at trigger time
-            }
-            logger.info(
-                f"Guest beach trigger scheduled at {trigger_time // 60:02d}:{trigger_time % 60:02d}"
-            )
+        # Ensure scheduled
+        self._schedule_guest()
 
         # Check if we've passed the trigger time
         active_hours = self.config.timing.get("active_hours", {})
@@ -576,7 +610,11 @@ class BeachCamService:
             return {"location": name}
 
     def run_scheduler(self):
-        """Run the fetch/process cycle on a schedule."""
+        """Run the fetch/process cycle on a schedule.
+
+        During active hours: fetch every interval.
+        At night: sleep until sunrise.
+        """
         interval = self.config.timing.get("fetch_interval_minutes", 5)
 
         # Run immediately on start
@@ -588,8 +626,29 @@ class BeachCamService:
 
         self._running = True
         while self._running:
+            if not self._debug and not self._is_active_time():
+                self._sleep_until_sunrise()
             schedule.run_pending()
             time.sleep(1)
+
+    def _sleep_until_sunrise(self):
+        """Sleep until next sunrise instead of polling every minute at night."""
+        active_hours = self.config.timing.get("active_hours", {})
+        tz_name = active_hours.get("timezone", "UTC")
+        tz = pytz.timezone(tz_name)
+        now = datetime.now(tz)
+
+        sun_times = self._get_sun_times()
+        sunrise_str = sun_times.get("sunrise") or active_hours.get("start", "06:00")
+        sunrise_hour, sunrise_min = map(int, sunrise_str.split(":"))
+
+        next_sunrise = now.replace(hour=sunrise_hour, minute=sunrise_min, second=0)
+        if next_sunrise <= now:
+            next_sunrise += timedelta(days=1)
+
+        sleep_seconds = int((next_sunrise - now).total_seconds())
+        logger.info(f"Night time — sleeping until {sunrise_str} ({sleep_seconds // 60} minutes)")
+        time.sleep(sleep_seconds)
 
     def run(self):
         """Start the full service (scheduler + HTTP server)."""
@@ -663,8 +722,8 @@ def main():
             names = [c["name"] for c in cameras]
             print(f"Guest beach '{args.guest}' not found. Available: {', '.join(names)}")
             sys.exit(1)
-        service._guest_today = {"date": datetime.now().strftime("%Y-%m-%d"), "camera": match, "cycle": 1}
-        service._cycle_count = 0  # _fetch_and_process will increment to 1
+        service._guest_today = {"date": datetime.now().strftime("%Y-%m-%d"), "camera": match}
+        service._guest_active = True
         success = service.fetch_and_process()
         service.fetcher.close()
         sys.exit(0 if success else 1)

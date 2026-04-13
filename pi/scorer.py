@@ -148,7 +148,8 @@ def _classify_pixels(arr: np.ndarray) -> Tuple[float, float, float]:
     v = max_c
 
     # Saturation 0-1
-    sat = np.where(max_c > 0, delta / max_c, 0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sat = np.where(max_c > 0, delta / max_c, 0)
 
     # Hue 0-360
     hue = np.zeros_like(max_c)
