@@ -270,6 +270,161 @@ This cycles: Green (3s) → Yellow (1s) → Red (3s) → repeat.
 
 ---
 
+## Exercise 5: Play Sound on a Speaker
+
+**Goal:** Play a tone through a small speaker using ESP32's built-in DAC.
+
+### Parts
+
+| Part | Notes |
+|------|-------|
+| 8ohm speaker (20mm) | Small, with P2.0 terminal wire |
+| 220ohm resistor | Same ones from LED exercises |
+
+### Why a Resistor?
+
+Same reason as LEDs — the speaker without a resistor would draw too much current:
+
+```
+Without resistor:
+GPIO25 ──→ Speaker (8ohm) ──→ GND
+           3.3V / 8ohm = 412mA  💀 ESP32 GPIO max is ~12mA!
+
+With 220ohm resistor:
+GPIO25 ──→ [220Ω] ──→ Speaker (8ohm) ──→ GND
+           3.3V / 228ohm = 14mA  ✓ Safe!
+```
+
+The sound will be quiet but audible — perfect for a notification sound.
+
+### Circuit
+
+```
+ESP32 GPIO25 ──→ [220Ω resistor] ──→ Speaker (+) ──→ Speaker (-) ──→ ESP32 GND
+```
+
+### Preparing the Speaker
+
+Your speaker has a **JST PH2.0 connector** (small 2-pin white plug) with two wires:
+- **Red wire** = (+) positive
+- **Black wire** = (-) negative / ground
+
+The JST plug doesn't fit in a breadboard. For prototyping, **cut the connector off**:
+1. Cut the wires ~3cm from the connector (keep the connector for later)
+2. Strip ~5mm of insulation from each wire end
+3. Twist the bare copper so it's neat
+4. Push bare wire ends into breadboard holes
+
+```
+Before:  [Speaker] ~~~red~~~ ─┐
+                               ├─ [JST PH2.0 plug]  ← cut here
+         [Speaker] ~~~black~~ ─┘
+
+After:   [Speaker] ~~~red~~~[bare end]    ← push into breadboard
+         [Speaker] ~~~black~[bare end]    ← push into breadboard
+```
+
+### Steps
+
+1. **Place resistor on breadboard:**
+   - One leg in row 25 (same row as ESP32 GPIO25 pin)
+   - Other leg in row 26
+
+2. **Connect speaker wires:**
+   - Red wire (stripped end) → row 26 (same row as resistor output)
+   - Black wire (stripped end) → breadboard (-) rail (GND)
+
+3. **Make sure GND rail is connected:**
+   - ESP32 GND → breadboard (-) rail
+
+### Breadboard Layout
+
+```
+    A B C D E     F G H I J
+    ───────────────────────
+25  o o[GPIO25]━━━[R]o o o   ← ESP32 pin + resistor leg 1
+26  o o o o o   o[R][red]o o  ← resistor leg 2 + speaker red wire
+(-)  ──────────────[blk]────   ← speaker black wire to GND rail
+```
+
+R = resistor, red = speaker red wire, blk = speaker black wire
+
+### Arduino Code: Simple Beep
+
+```cpp
+#define SPEAKER_PIN 25  // DAC pin
+
+void setup() {
+  // Nothing needed - DAC works immediately
+}
+
+void loop() {
+  // Play a simple tone using DAC
+  for (int i = 0; i < 500; i++) {
+    dacWrite(SPEAKER_PIN, 255);  // High
+    delayMicroseconds(500);      // 1kHz tone
+    dacWrite(SPEAKER_PIN, 0);    // Low
+    delayMicroseconds(500);
+  }
+  delay(2000);  // Wait 2 seconds, repeat
+}
+```
+
+You should hear a 1kHz beep for half a second, then silence, then repeat.
+
+### Arduino Code: Whoosh Sound (Frequency Sweep)
+
+```cpp
+#define SPEAKER_PIN 25
+
+void playWhoosh() {
+  // Sweep frequency from low to high (like a wave)
+  for (int freq = 200; freq < 2000; freq += 10) {
+    int halfPeriod = 500000 / freq;  // microseconds
+    for (int i = 0; i < freq / 50; i++) {
+      dacWrite(SPEAKER_PIN, 200);
+      delayMicroseconds(halfPeriod);
+      dacWrite(SPEAKER_PIN, 50);
+      delayMicroseconds(halfPeriod);
+    }
+  }
+  dacWrite(SPEAKER_PIN, 0);  // Silence
+}
+
+void setup() {
+  playWhoosh();
+}
+
+void loop() {
+  delay(5000);
+  playWhoosh();  // Play every 5 seconds for testing
+}
+```
+
+This creates a rising frequency sweep that sounds like a wave/whoosh.
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| No sound | Check speaker wires are in correct rows |
+| No sound | Check resistor connects GPIO25 row to speaker (+) row |
+| Very quiet | Normal with 220ohm resistor — hold speaker near ear |
+| Buzzy/distorted | Reduce dacWrite max value from 255 to 150 |
+
+### What's Different from LEDs?
+
+| LED | Speaker |
+|-----|---------|
+| ON or OFF (digital) | Varying voltage (analog/DAC) |
+| `digitalWrite(pin, HIGH)` | `dacWrite(pin, 0-255)` |
+| GPIO can be any pin | DAC only on GPIO25 or GPIO26 |
+| Light | Sound |
+
+Both need a resistor to limit current. Same concept, different output!
+
+---
+
 ## What You Learned
 
 After these exercises you understand:
@@ -282,6 +437,8 @@ After these exercises you understand:
 | Breadboard rows | Holes in same row are connected |
 | Button | Connects/disconnects circuit |
 | GPIO | ESP32 pins you control with code |
+| DAC | Analog output (GPIO25/26) for audio |
+| Speaker + resistor | Same current-limiting concept as LED |
 
 ---
 

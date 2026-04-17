@@ -66,45 +66,37 @@ class SurfConditions:
         if self.wave_height is None:
             return 0
 
-        score = 0.0
         wave_cm = self.wave_height * 100  # Convert to cm
 
-        # Wave height score (0-5 points)
-        # Perfect score if within preferred range
-        if prefs.min_wave_cm <= wave_cm <= prefs.max_wave_cm:
-            # Skewed: bigger waves in range score higher
-            # min → 3.5, max → 5.0
-            position = (wave_cm - prefs.min_wave_cm) / (prefs.max_wave_cm - prefs.min_wave_cm)
-            wave_score = 3.5 + position * 1.5
-            score += wave_score
-        elif wave_cm < prefs.min_wave_cm:
-            # Too small - score decreases as it gets smaller
-            ratio = wave_cm / prefs.min_wave_cm
-            score += 5.0 * ratio * 0.5  # Max 2.5 if just under
+        # --- Wave height: base score 0-7 ---
+        # Linear triangle: peak at 90cm, zero at 40cm and 120cm
+        peak_cm = 90
+        low_cm = 40   # Below this = flat
+        high_cm = 120  # Above this = too big
+
+        if wave_cm < low_cm:
+            height_score = 0.0
+        elif wave_cm <= peak_cm:
+            height_score = 7.0 * (wave_cm - low_cm) / (peak_cm - low_cm)
+        elif wave_cm <= high_cm:
+            height_score = 7.0 * (high_cm - wave_cm) / (high_cm - peak_cm)
         else:
-            # Too big - gentle falloff near max, steeper further out
-            over_pct = (wave_cm - prefs.max_wave_cm) / prefs.max_wave_cm
-            # 10% over → ~4.5, 30% over → ~3.5, 50%+ over → ~2.5
-            score += 5.0 * max(0.4, 1.0 - over_pct * 2.0)
+            height_score = 0.0
 
-        # Wave period score (0-2 points)
-        # Longer period = cleaner waves
-        # Tuned for Mediterranean (Tel Aviv): 10s+ is great, 7s+ is good
-        if self.wave_period:
-            if self.wave_period >= 10:
-                score += 2.0
-            elif self.wave_period >= 5:
-                # Smooth gradient: 5s → 1.0, 10s → 2.0
-                score += 1.0 + (self.wave_period - 5) * 0.2
-            else:
-                # Below 5s: choppy
-                score += max(0.0, self.wave_period / 5.0 * 1.0)
+        # --- Wave period: 0-3 points ---
+        # Mediterranean tuned: 10s+ is great, 4s is chop
+        if self.wave_period and self.wave_period >= 4:
+            period_score = min(3.0, (self.wave_period - 4) / 6.0 * 3.0)
+        else:
+            period_score = 0.0
 
-        # Combined wind score (0-3 points)
-        # Direction only matters when wind is strong enough to feel
+        base_score = height_score + period_score
+
+        # --- Wind: penalty only (subtract 0-3) ---
+        wind_penalty = 0.0
         if self.wind_speed is not None:
-            # Classify direction: offshore, cross, or onshore
-            wind_type = "cross"  # default if no direction data
+            # Classify direction
+            wind_type = "cross"
             if self.wind_direction is not None:
                 offshore_dir = (prefs.beach_facing + 180) % 360
                 angle_diff = abs(self.wind_direction - offshore_dir)
@@ -116,31 +108,33 @@ class SurfConditions:
                     wind_type = "onshore"
 
             if self.wind_speed <= 5:
-                score += 3.0  # Glass, direction irrelevant
+                wind_penalty = 0.0  # Glass, no penalty
             elif self.wind_speed <= 10:
-                if wind_type == "offshore":
-                    score += 2.5
+                if wind_type == "onshore":
+                    wind_penalty = 0.5
                 elif wind_type == "cross":
-                    score += 2.0
-                else:
-                    score += 1.5  # Light onshore
+                    wind_penalty = 0.25
+                # Offshore: 0
             elif self.wind_speed <= 20:
-                if wind_type == "offshore":
-                    score += 2.0
+                if wind_type == "onshore":
+                    wind_penalty = 2.0
                 elif wind_type == "cross":
-                    score += 1.5
+                    wind_penalty = 1.0
                 else:
-                    score += 1.0  # Onshore
+                    wind_penalty = 0.5  # Strong offshore still not perfect
             else:
-                # 20+ km/h — direction matters a lot
-                if wind_type == "offshore":
-                    score += 1.0
+                # 20+ km/h
+                if wind_type == "onshore":
+                    wind_penalty = 3.0
                 elif wind_type == "cross":
-                    score += 0.5
-                # Onshore 20+ = 0 points
+                    wind_penalty = 2.0
+                else:
+                    wind_penalty = 1.0
 
-        # Round and clamp to 1-10
-        rating = max(1, min(10, round(score)))
+        score = base_score - wind_penalty
+
+        # Round and clamp to 0-10
+        rating = max(0, min(10, round(score)))
         return rating
 
     def get_quality_label(self, rating: int) -> str:

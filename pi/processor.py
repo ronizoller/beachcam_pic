@@ -116,17 +116,17 @@ class Processor:
                                tint_whites=tint_whites, sky_tint=sky_tint)
         logger.debug(f"Applied preprocessing (blur={blur_radius}, sat={saturation}, contrast={contrast}, brightness={brightness})")
 
-        # Step 3: Color reduction with PIL dithering
+        # Step 3: Add overlay BEFORE dithering (for semi-transparent pill effect)
+        if overlay_config.get("enabled", True) and weather_data:
+            img = self._add_pill_overlay(img, weather_data, overlay_config)
+            logger.debug("Added overlay")
+
+        # Step 4: Color reduction with PIL dithering
         import time as _time
         t0 = _time.time()
         img = self._reduce_colors(img, color_mode, dithering)
         dt = _time.time() - t0
         logger.info(f"Dithering: {color_mode} palette, method=PIL, time={dt:.2f}s")
-
-        # Step 4: Add overlay AFTER color reduction (so text stays crisp)
-        if overlay_config.get("enabled", True) and weather_data:
-            img = self._add_minimal_overlay(img, weather_data, overlay_config)
-            logger.debug("Added overlay")
 
         return img
 
@@ -271,6 +271,142 @@ class Processor:
         pal_img.putpalette(flat_pal)
         quantized = image.quantize(colors=len(palette), palette=pal_img, dither=0)
         return quantized.convert('RGB')
+
+    def _add_pill_overlay(
+        self,
+        image: Image.Image,
+        weather_data: dict,
+        config: dict,
+    ) -> Image.Image:
+        """
+        Add semi-transparent pill overlay with surf data.
+
+        Layout: Two stacked rounded pills, bottom-right.
+        Top pill: colored rating dot + wave data + wind speed + wind arrow
+        Bottom pill: location · time
+        Drawn BEFORE dithering so gray background gets dithered = transparency effect.
+        """
+        import math
+        img = image.copy()
+        draw = ImageDraw.Draw(img)
+
+        # Load Jost font (free Futura alternative)
+        font_dir = Path(__file__).parent / "fonts"
+        try:
+            font_md = ImageFont.truetype(str(font_dir / "Jost-Medium.ttf"), 22)
+            font_sm = ImageFont.truetype(str(font_dir / "Jost-Regular.ttf"), 16)
+        except Exception:
+            try:
+                font_md = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 22)
+                font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+            except Exception:
+                font_md = ImageFont.load_default()
+                font_sm = ImageFont.load_default()
+
+        width, height = img.size
+        bg_color = (80, 80, 80)  # 70% opacity gray (gets dithered)
+        text_color = (255, 255, 255)
+        padding = 25
+
+        # --- Build text content ---
+        wave = weather_data.get("wave_height")
+        period = weather_data.get("wave_period")
+        if wave and period:
+            wave_text = f"{wave}@{period}"
+        elif wave:
+            wave_text = wave
+        else:
+            wave_text = ""
+
+        wind_speed = weather_data.get("wind_speed", "")
+        wind_dir = weather_data.get("wind_direction", "")
+
+        location = weather_data.get("location", "")
+        time_str = datetime.now().strftime("%H:%M")
+
+        rating = weather_data.get("rating")
+        if rating is not None:
+            if rating <= 3:
+                r_color = (255, 0, 0)
+            elif rating <= 6:
+                r_color = (255, 255, 0)
+            else:
+                r_color = (0, 255, 0)
+
+        # --- Top pill: rating + wave + wind + arrow ---
+        top_parts = []
+        if wave_text:
+            top_parts.append(wave_text)
+        if wind_speed:
+            top_parts.append(f"{wind_speed}")
+        top_text = "  ".join(top_parts)
+
+        top_bbox = draw.textbbox((0, 0), top_text, font=font_md)
+        top_text_w = top_bbox[2] - top_bbox[0]
+        top_text_h = top_bbox[3] - top_bbox[1]
+
+        dot_space = 38 if rating is not None else 0
+        arrow_space = 22 if wind_dir else 0
+        pill_w = dot_space + top_text_w + arrow_space + 30
+        pill_h = 42
+        pill_r = pill_h // 2
+
+        px = width - pill_w - padding
+        py = height - pill_h * 2 - padding - 8
+
+        draw.rounded_rectangle([px, py, px + pill_w, py + pill_h], radius=pill_r, fill=bg_color)
+
+        # Rating dot
+        if rating is not None:
+            dot_r = 14
+            dot_cx = px + 8 + dot_r
+            dot_cy = py + pill_h // 2
+            draw.ellipse([dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r], fill=r_color)
+            r_text = str(rating)
+            rb = draw.textbbox((0, 0), r_text, font=font_sm)
+            rw = rb[2] - rb[0]
+            draw.text((dot_cx - rw // 2, dot_cy - 9), r_text, fill=(0, 0, 0), font=font_sm)
+
+        # Wave + wind text
+        draw.text((px + dot_space + 5, py + 8), top_text, fill=text_color, font=font_md)
+
+        # Wind arrow
+        if wind_dir:
+            arrow_x = px + pill_w - 18
+            arrow_y = py + pill_h // 2
+            angle_map = {
+                "N": 180, "NE": 225, "E": 270, "SE": 315,
+                "S": 0, "SW": 45, "W": 90, "NW": 135,
+            }
+            angle = math.radians(angle_map.get(wind_dir, 0))
+            size, hd, ha = 8, 4, 0.5
+            x1 = arrow_x - size * math.sin(angle)
+            y1 = arrow_y + size * math.cos(angle)
+            x2 = arrow_x + size * math.sin(angle)
+            y2 = arrow_y - size * math.cos(angle)
+            hx1 = x2 - hd * math.sin(angle - ha)
+            hy1 = y2 + hd * math.cos(angle - ha)
+            hx2 = x2 - hd * math.sin(angle + ha)
+            hy2 = y2 + hd * math.cos(angle + ha)
+            draw.line([(x1, y1), (x2, y2)], fill=text_color, width=2)
+            draw.line([(x2, y2), (hx1, hy1)], fill=text_color, width=2)
+            draw.line([(x2, y2), (hx2, hy2)], fill=text_color, width=2)
+
+        # --- Bottom pill: location · time ---
+        bottom_text = f"{location} · {time_str}" if location else time_str
+        bot_bbox = draw.textbbox((0, 0), bottom_text, font=font_md)
+        bot_text_w = bot_bbox[2] - bot_bbox[0]
+        pill2_w = bot_text_w + 30
+        pill2_h = 38
+        pill2_r = pill2_h // 2
+
+        px2 = width - pill2_w - padding
+        py2 = py + pill_h + 8
+
+        draw.rounded_rectangle([px2, py2, px2 + pill2_w, py2 + pill2_h], radius=pill2_r, fill=bg_color)
+        draw.text((px2 + 15, py2 + 7), bottom_text, fill=text_color, font=font_md)
+
+        return img
 
     def _add_minimal_overlay(
         self,

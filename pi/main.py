@@ -177,8 +177,13 @@ class BeachCamService:
             logger.debug(f"Rotated {rotation}° and trimmed borders")
             logger.debug(f"Rotated {rotation}° and trimmed borders")
 
-        # --- Step 3: Color correction ---
-        cropped_img = self._auto_color_correct(cropped_img)
+        # --- Step 3: Color correction (only if camera opts in) ---
+        if is_guest and camera.get("auto_color_correct", False):
+            cropped_img = self._auto_color_correct(cropped_img)
+        elif not is_guest:
+            main_camera = self.config.cameras[0] if self.config.cameras else {}
+            if main_camera.get("auto_color_correct", False):
+                cropped_img = self._auto_color_correct(cropped_img)
 
         # --- Step 4: Filter ---
         filter_result = self.filter.filter(cropped_img)

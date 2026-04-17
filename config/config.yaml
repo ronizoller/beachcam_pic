@@ -125,16 +125,46 @@ guest_beaches:
         lat: 28.5007
         lon: 34.5133
         name: "Dahab"
+    - name: "Ilia Beach, Evia"
+      # JPEG snapshot from Ilia Mare Hotel cam (2560x1440)
+      # Cache-busting param needed: Cloudflare caches aggressively (max-age=14400)
+      # On Pi: curl -so frame.jpg "URL?t=$(date +%s)"
+      # HLS alternative: https://live.iliamare.gr/memfs/9fb933aa-5d49-4b6c-a004-fe8f3fc9f282.m3u8
+      url: "https://live.iliamare.gr/memfs/9fb933aa-5d49-4b6c-a004-fe8f3fc9f282.jpg"
+      type: "snapshot"
+      crop_box: [0, 130, 2560, 1440] # Crop top timestamp + ILIA MARE HOTEL text
+      rotation: 5.0 
+      timezone: "Europe/Athens"
+      processing:
+        blur: 1.5
+        saturation: 1.0
+        contrast: 1.1
+        brightness: 0.9
+      scoring_profile: "beach"
+      location:
+        lat: 38.8489
+        lon: 23.1236
+        name: "Ilia Beach, Evia"
     - name: "Niagara Falls"
       url: "https://images-webcams.windy.com/91/1240237991/current/full/1240237991.jpg"
       type: "snapshot"
-      crop_box: null
+      crop_box: [0, 0, 1280, 690]  # Crop bottom bar
       timezone: "America/New_York"
       scoring_profile: "beach"
       location:
         lat: 43.0896
         lon: -79.0849
         name: "Niagara Falls"
+    - name: "Taylors Mistake, NZ"
+      url: "https://stream.webmad.co.nz/shots/taylorseast.jpg"
+      type: "snapshot"
+      crop_box: [0, 60, 1280, 690]  # Crop top/bottom watermarks
+      timezone: "Pacific/Auckland"
+      scoring_profile: "beach"
+      location:
+        lat: -43.5731
+        lon: 172.7636
+        name: "Taylors Mistake, NZ"
 
 # ========== AD DETECTION ==========
 filter:

@@ -14,7 +14,9 @@ This document describes all hardware connections for the Surf E-Ink Frame projec
 | Microcontroller | ESP32 DevKitC 32U | WiFi, USB-C, 38 pins |
 | Test Display | Waveshare 1.54" E-Ink | B/W, SPI, includes HAT |
 | Production Display | Waveshare 13.3" Spectra 6 | 6-color, 1600x1200, SPI |
-| Server | Raspberry Pi Zero W v1.1 | WiFi built-in, wall powered |
+| Server | Raspberry Pi Zero 2 W | WiFi built-in, wall powered, 512MB |
+| Speaker | 8ohm 2W (or 4ohm 3W) | 25x35mm square, ultra-thin |
+| Speaker resistor | 220ohm 1W | Current limiter for DAC output |
 | Wires | Dupont male-to-female | 20cm, various colors |
 | Breadboard | 830 points (full size) | For prototyping |
 
@@ -89,7 +91,19 @@ Use **male-to-female** Dupont wires to connect to E-Ink HAT:
 - GPIO16 row → E-Ink RST (white, male-to-female)
 - GPIO4 row → E-Ink BUSY (purple, male-to-female)
 
-**Step 4: Battery power (optional, for battery test)**
+**Step 4: Speaker (from ESP32 DAC)**
+- GPIO25 row → 220ohm resistor → speaker (+) wire
+- Speaker (-) wire → breadboard (-) rail (GND)
+- The resistor can sit in two adjacent breadboard rows
+
+```
+    Breadboard rows:
+    row 20: [GPIO25 pin] ──── [resistor leg 1]
+    row 21:                    [resistor leg 2] ──── [speaker + wire]
+    (-) rail: ──────────────────────────────────── [speaker - wire]
+```
+
+**Step 5: Battery power (optional, for battery test)**
 - TP4056 OUT+ → Switch → breadboard row next to ESP32 5V pin
 - TP4056 OUT- → breadboard (-) rail
 
@@ -179,6 +193,48 @@ The E-Ink display connects to the ESP32 via SPI. There are 8 wires total.
 
 ---
 
+## Speaker Wiring (Guest Beach Whoosh Sound)
+
+A small speaker plays a wave/whoosh sound when a guest beach image is displayed.
+
+### Connections (2 wires + 1 resistor)
+
+| From | To | Wire/Component |
+|------|----|----------------|
+| ESP32 **GPIO25** | **220ohm resistor** leg 1 | Short wire or direct |
+| **220ohm resistor** leg 2 | Speaker **(+)** | Wire |
+| Speaker **(-)** | ESP32 **GND** | Black wire |
+
+### Why GPIO25?
+
+GPIO25 is one of the ESP32's two built-in DAC (Digital-to-Analog Converter) pins. 
+The DAC outputs a real analog audio signal — no PWM buzzing, actual smooth audio.
+
+### Why the 220ohm resistor?
+
+The ESP32 GPIO can only safely output ~12mA. The resistor limits current:
+- 8ohm speaker: 3.3V / (220 + 8) = 14mA (safe)
+- 4ohm speaker: 3.3V / (220 + 4) = 15mA (safe)
+- Without resistor: 3.3V / 8 = 412mA (would damage the ESP32!)
+
+The sound will be quiet but audible — enough for a subtle whoosh notification.
+
+### Speaker choice
+
+- **8ohm 2W** — best match for ESP32 DAC, lower current draw
+- **4ohm 3W** — works fine with 220ohm resistor, slightly louder
+- Small square speakers (25x35mm) fit inside a picture frame
+
+### Audio file
+
+The whoosh WAV file is stored in ESP32 flash (SPIFFS partition):
+- Format: 8-bit, 8kHz, mono WAV
+- Size: ~8KB for 1 second
+- Stored at: `/whoosh.wav` in SPIFFS
+- Plays when ESP32 detects a guest beach image (`"guest": true` in metadata)
+
+---
+
 ## Raspberry Pi (Separate System)
 
 The Raspberry Pi is **completely separate** from the battery-powered frame. It stays plugged into the wall.
@@ -231,15 +287,16 @@ When you're ready to assemble, follow this order:
     5V ─┤                 ├─ GPIO5  (CS)
         │                 ├─ GPIO17 (DC)
         │                 ├─ GPIO16 (RST)
-        │                 ├─ GPIO4  (BUSY)
+ GPIO25─┤ (Speaker DAC)   ├─ GPIO4  (BUSY)
         │                 │
         └─────────────────┘
 ```
 
 **Left side pins used:**
 - 3V3 → E-Ink VCC (red wire)
-- GND → E-Ink GND and TP4056 OUT- (black wires)
+- GND → E-Ink GND, TP4056 OUT-, Speaker (-) (black wires)
 - 5V ← From switch (red wire, power input)
+- GPIO25 → 220ohm resistor → Speaker (+)
 
 **Right side pins used:**
 - GPIO23 → DIN (blue)
