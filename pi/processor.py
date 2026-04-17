@@ -1,8 +1,7 @@
 """
 Processor module - converts images for E-Ink display.
-Handles resizing, preprocessing, color reduction, and overlay.
 
-Pipeline: resize → preprocess → overlay → color reduction → (optional dithering)
+Pipeline: resize → overlay → PIL dithering (6-color)
 """
 
 import logging
@@ -10,8 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont
 
 from config import get_config
 
@@ -70,28 +68,24 @@ class Processor:
         self,
         image: Image.Image,
         weather_data: dict = None,
-        processing: dict = None,
     ) -> Image.Image:
         """
         Process image for E-Ink display.
 
         Pipeline:
         1. Resize to display dimensions
-        2. Preprocess (blur, saturation, contrast)
-        3. Color reduction to palette
-        4. Add overlay text
+        2. Add overlay (before dithering for transparency effect)
+        3. Color reduction with PIL dithering
 
         Args:
             image: Input PIL Image.
             weather_data: Optional dict with weather info for overlay.
-            processing: Optional per-camera processing params (blur, dither_strength).
 
         Returns:
             Processed PIL Image ready for E-Ink.
         """
         display = self.config.display
         overlay_config = self.config.overlay
-        proc = processing or {}
 
         # Get settings
         width = display.get("width", 800)
@@ -99,24 +93,11 @@ class Processor:
         color_mode = display.get("color_mode", "7color")
         dithering = display.get("dithering", True)
 
-        blur_radius = proc.get("blur", 1.1)
-        saturation = proc.get("saturation", 0.9)
-        contrast = proc.get("contrast", 0.85)
-        brightness = proc.get("brightness", 1.0)
-        tint_whites = proc.get("tint_whites", False)
-        sky_tint = proc.get("sky_tint", False)
-
         # Step 1: Resize
         img = self._resize(image, width, height)
         logger.debug(f"Resized to {width}x{height}")
 
-        # Step 2: Preprocess
-        img = self._preprocess(img, blur_radius=blur_radius, saturation=saturation,
-                               contrast=contrast, brightness=brightness,
-                               tint_whites=tint_whites, sky_tint=sky_tint)
-        logger.debug(f"Applied preprocessing (blur={blur_radius}, sat={saturation}, contrast={contrast}, brightness={brightness})")
-
-        # Step 3: Add overlay BEFORE dithering (for semi-transparent pill effect)
+        # Step 2: Add overlay BEFORE dithering (for semi-transparent pill effect)
         if overlay_config.get("enabled", True) and weather_data:
             img = self._add_pill_overlay(img, weather_data, overlay_config)
             logger.debug("Added overlay")
@@ -129,100 +110,6 @@ class Processor:
         logger.info(f"Dithering: {color_mode} palette, method=PIL, time={dt:.2f}s")
 
         return img
-
-    def _preprocess(self, image: Image.Image, blur_radius: float = 1.1,
-                     saturation: float = 0.9, contrast: float = 0.85,
-                     brightness: float = 1.0, tint_whites: bool = False,
-                     sky_tint: bool = False) -> Image.Image:
-        """
-        Preprocess image for cleaner E-Ink output.
-        """
-        img = image.convert("RGB")
-
-        # 1. Blur
-        img = img.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-
-        # 2. Saturation
-        img = ImageEnhance.Color(img).enhance(saturation)
-
-        # 3. Contrast
-        img = ImageEnhance.Contrast(img).enhance(contrast)
-
-        # 4. Brightness
-        if brightness != 1.0:
-            img = ImageEnhance.Brightness(img).enhance(brightness)
-
-        # 5. Neutral color temperature
-        img = self._add_warmth(img, 0.05)
-
-        # 6. Tint white pixels toward pink (for cameras with pink tint)
-        if tint_whites:
-            arr = np.array(img, dtype=np.float32)
-            bright = arr.mean(axis=2) > 180
-            arr[bright, 0] = np.clip(arr[bright, 0] * 1.05, 0, 255)
-            arr[bright, 1] = arr[bright, 1] * 0.85
-            arr[bright, 2] = arr[bright, 2] * 0.9
-            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-
-        # 7. Sky tint — darken and blue-shift upper 45% of image
-        if sky_tint:
-            arr = np.array(img, dtype=np.float32)
-            sky_h = int(arr.shape[0] * 0.45)
-            sky = arr[:sky_h]
-            bright = sky.mean(axis=2) > 170
-            sky[bright, 2] = np.clip(sky[bright, 2] * 1.15, 0, 255)
-            sky[bright, 0] = sky[bright, 0] * 0.9
-            sky[bright, 1] = sky[bright, 1] * 0.9
-            arr[:sky_h] = sky * 0.9
-            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-
-        # 8. Push grays toward palette colors (only if saturation > 1)
-        if saturation > 1.0:
-            img = self._push_grays_to_palette(img)
-
-        return img
-
-    def _push_grays_to_palette(self, image: Image.Image) -> Image.Image:
-        """
-        Push desaturated (gray) pixels toward nearby palette colors.
-        Gray sky → blue tint, gray sand → yellow tint, dark gray → stays dark.
-        This helps the 6-color dithering produce cleaner results.
-        """
-        arr = np.array(image, dtype=np.float32)
-        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-
-        # Detect gray pixels: low saturation (channels are similar)
-        max_c = np.maximum(np.maximum(r, g), b)
-        min_c = np.minimum(np.minimum(r, g), b)
-        saturation = np.where(max_c > 0, (max_c - min_c) / max_c, 0)
-        brightness = (r + g + b) / 3
-
-        # Gray mask: low saturation, not too dark, not too bright
-        is_gray = (saturation < 0.15) & (brightness > 40) & (brightness < 220)
-
-        # Push bright grays (sky) toward blue
-        bright_gray = is_gray & (brightness > 120)
-        arr[bright_gray, 2] = np.clip(arr[bright_gray, 2] * 1.3, 0, 255)  # Boost blue
-        arr[bright_gray, 0] = arr[bright_gray, 0] * 0.85  # Reduce red
-
-        # Push mid grays (buildings/land) toward warm tone
-        mid_gray = is_gray & (brightness >= 60) & (brightness <= 120)
-        arr[mid_gray, 0] = np.clip(arr[mid_gray, 0] * 1.1, 0, 255)  # Slight red
-        arr[mid_gray, 1] = np.clip(arr[mid_gray, 1] * 1.05, 0, 255)  # Slight green
-
-        return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-
-    def _add_warmth(self, image: Image.Image, amount: float = 0.1) -> Image.Image:
-        """Shift color temperature. Positive = warmer (more red), negative = cooler (more blue)."""
-        import numpy as np
-        arr = np.array(image, dtype=np.float32)
-
-        # Adjust color temperature: positive warms, negative cools
-        arr[:, :, 0] = np.clip(arr[:, :, 0] * (1 + amount), 0, 255)      # Red +
-        arr[:, :, 1] = np.clip(arr[:, :, 1] * (1 + amount * 0.1), 0, 255) # Green minimal
-        arr[:, :, 2] = np.clip(arr[:, :, 2] * (1 - amount * 0.15), 0, 255) # Blue slight -
-
-        return Image.fromarray(arr.astype(np.uint8))
 
     def _resize(self, image: Image.Image, width: int, height: int) -> Image.Image:
         """Resize image to target dimensions, maintaining aspect ratio with crop."""

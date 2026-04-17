@@ -235,12 +235,7 @@ class BeachCamService:
             weather_data = self._get_weather_data()
 
         # --- Step 8: Process for E-Ink (resize, preprocess, dither, overlay) ---
-        if best.get("guest") and best.get("guest_camera"):
-            processing = best["guest_camera"].get("processing")
-        else:
-            main_camera = self.config.cameras[0] if self.config.cameras else {}
-            processing = main_camera.get("processing")
-        processed_img = self.processor.process(best_img, weather_data, processing=processing)
+        processed_img = self.processor.process(best_img, weather_data)
 
         # --- Step 9: Save ---
         output_path = self.data_dir / "current.bmp"
