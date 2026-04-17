@@ -16,7 +16,7 @@ from config import get_config
 logger = logging.getLogger(__name__)
 
 
-def create_app(on_image_pulled=None, get_sleep_minutes=None) -> Flask:
+def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None) -> Flask:
     """Create and configure Flask application.
 
     Args:
@@ -36,7 +36,7 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None) -> Flask:
         return jsonify({
             "status": "ok",
             "service": "beachcam",
-            "endpoints": ["/image", "/hash", "/metadata", "/preview"]
+            "endpoints": ["/image", "/hash", "/metadata", "/preview", "/raw", "/sleep", "/guest"]
         })
 
     @app.route("/image")
@@ -117,6 +117,13 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None) -> Flask:
             return Response("No raw image available", status=404)
         return send_file(raw_path, mimetype="image/png")
 
+    @app.route("/guest")
+    def get_guest():
+        """Get today's guest beach schedule."""
+        if get_guest_info:
+            return jsonify(get_guest_info())
+        return jsonify({"status": "no guest info available"})
+
     @app.route("/sleep")
     def get_sleep():
         """
@@ -149,9 +156,9 @@ def _load_metadata(path: Path) -> Optional[dict]:
 class Server:
     """HTTP server for serving images to ESP32."""
 
-    def __init__(self, on_image_pulled=None, get_sleep_minutes=None):
+    def __init__(self, on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None):
         self.config = get_config()
-        self.app = create_app(on_image_pulled=on_image_pulled, get_sleep_minutes=get_sleep_minutes)
+        self.app = create_app(on_image_pulled=on_image_pulled, get_sleep_minutes=get_sleep_minutes, get_guest_info=get_guest_info)
         self._thread: Optional[Thread] = None
 
     def run(self, threaded: bool = False):

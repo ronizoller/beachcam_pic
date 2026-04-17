@@ -209,16 +209,28 @@ class Processor:
         wind_dir = weather_data.get("wind_direction", "")
 
         location = weather_data.get("location", "")
-        time_str = datetime.now().strftime("%H:%M")
+        israel_time = datetime.now().strftime("%H:%M")
+
+        # If guest cam has a timezone, show local time + Israel time
+        guest_tz = weather_data.get("timezone")
+        if guest_tz:
+            try:
+                import pytz
+                local_now = datetime.now(pytz.timezone(guest_tz))
+                time_str = f"{local_now.strftime('%H:%M')} ({israel_time} IL)"
+            except Exception:
+                time_str = israel_time
+        else:
+            time_str = israel_time
 
         rating = weather_data.get("rating")
         if rating is not None:
             if rating <= 3:
-                r_color = (255, 0, 0)
+                r_color = (200, 80, 80)     # Soft red/coral
             elif rating <= 6:
-                r_color = (255, 255, 0)
+                r_color = (200, 190, 80)    # Soft gold
             else:
-                r_color = (0, 255, 0)
+                r_color = (80, 180, 100)    # Soft green
 
         # --- Top pill: rating + wave + wind + arrow ---
         top_parts = []
@@ -232,9 +244,10 @@ class Processor:
         top_text_w = top_bbox[2] - top_bbox[0]
         top_text_h = top_bbox[3] - top_bbox[1]
 
-        dot_space = 38 if rating is not None else 0
-        arrow_space = 22 if wind_dir else 0
-        pill_w = dot_space + top_text_w + arrow_space + 30
+        gap = 12  # Consistent spacing between elements
+        dot_space = (8 + 36 + gap) if rating is not None else 0  # margin + circle + gap
+        arrow_space = (gap + 26) if wind_dir else 0  # gap + arrow size
+        pill_w = dot_space + top_text_w + arrow_space + 10
         pill_h = 42
         pill_r = pill_h // 2
 
@@ -245,39 +258,46 @@ class Processor:
 
         # Rating dot
         if rating is not None:
-            dot_r = 14
+            dot_r = 18
             dot_cx = px + 8 + dot_r
             dot_cy = py + pill_h // 2
             draw.ellipse([dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r], fill=r_color)
             r_text = str(rating)
-            rb = draw.textbbox((0, 0), r_text, font=font_sm)
+            rb = draw.textbbox((0, 0), r_text, font=font_md)
             rw = rb[2] - rb[0]
-            draw.text((dot_cx - rw // 2, dot_cy - 9), r_text, fill=(0, 0, 0), font=font_sm)
+            rh = rb[3] - rb[1]
+            # Center text in circle using anchor if available, otherwise manual offset
+            tx = dot_cx - rw // 2 - rb[0]
+            ty = dot_cy - rh // 2 - rb[1]
+            draw.text((tx, ty), r_text, fill=(0, 0, 0), font=font_md)
 
         # Wave + wind text
-        draw.text((px + dot_space + 5, py + 8), top_text, fill=text_color, font=font_md)
+        draw.text((px + dot_space, py + 8), top_text, fill=text_color, font=font_md)
 
-        # Wind arrow
+        # Wind arrow — positioned right after the text
         if wind_dir:
-            arrow_x = px + pill_w - 18
+            arrow_x = px + dot_space + top_text_w + gap + 12
             arrow_y = py + pill_h // 2
             angle_map = {
                 "N": 180, "NE": 225, "E": 270, "SE": 315,
                 "S": 0, "SW": 45, "W": 90, "NW": 135,
             }
             angle = math.radians(angle_map.get(wind_dir, 0))
-            size, hd, ha = 8, 4, 0.5
-            x1 = arrow_x - size * math.sin(angle)
-            y1 = arrow_y + size * math.cos(angle)
-            x2 = arrow_x + size * math.sin(angle)
-            y2 = arrow_y - size * math.cos(angle)
+            # Clock-hand style: fixed center, rotates to show direction
+            # Line from center
+            line_len = 10
+            x1 = arrow_x - line_len * math.sin(angle)
+            y1 = arrow_y + line_len * math.cos(angle)
+            x2 = arrow_x + line_len * math.sin(angle)
+            y2 = arrow_y - line_len * math.cos(angle)
+            draw.line([(x1, y1), (x2, y2)], fill=text_color, width=2)
+            # Solid triangle head at tip
+            hd, ha = 14, 0.6
             hx1 = x2 - hd * math.sin(angle - ha)
             hy1 = y2 + hd * math.cos(angle - ha)
             hx2 = x2 - hd * math.sin(angle + ha)
             hy2 = y2 + hd * math.cos(angle + ha)
-            draw.line([(x1, y1), (x2, y2)], fill=text_color, width=2)
-            draw.line([(x2, y2), (hx1, hy1)], fill=text_color, width=2)
-            draw.line([(x2, y2), (hx2, hy2)], fill=text_color, width=2)
+            draw.polygon([(x2, y2), (hx1, hy1), (hx2, hy2)], fill=text_color)
 
         # --- Bottom pill: location · time ---
         bottom_text = f"{location} · {time_str}" if location else time_str

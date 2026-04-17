@@ -56,7 +56,7 @@ class BeachCamService:
         self.cropper = Cropper()
         self.filter = FrameFilter()
         self.processor = Processor()
-        self.server = Server(on_image_pulled=self._on_image_pulled, get_sleep_minutes=self._get_sleep_minutes)
+        self.server = Server(on_image_pulled=self._on_image_pulled, get_sleep_minutes=self._get_sleep_minutes, get_guest_info=self._get_guest_info)
         self.surf_data = SurfDataFetcher()
 
         self._running = False
@@ -391,6 +391,25 @@ class BeachCamService:
         self._candidates_since = datetime.now()
         logger.info(f"Candidates cleared ({reason})")
 
+    def _get_guest_info(self) -> dict:
+        """Return today's guest beach schedule info."""
+        if not self._guest_today:
+            return {"status": "no guest scheduled"}
+
+        trigger = self._guest_today.get("trigger_minutes", 0)
+        trigger_time = f"{trigger // 60:02d}:{trigger % 60:02d}"
+
+        camera = self._guest_today.get("camera")
+        camera_name = camera["name"] if camera else "not yet picked"
+
+        return {
+            "date": self._guest_today.get("date"),
+            "trigger_time": trigger_time,
+            "camera": camera_name,
+            "active": self._guest_active,
+            "used_today": self._guest_used_today == datetime.now().strftime("%Y-%m-%d"),
+        }
+
     def _on_image_pulled(self):
         """Called by server when ESP32 pulls /image."""
         self.image_pulled = True
@@ -604,7 +623,9 @@ class BeachCamService:
 
             rating = conditions.calculate_quality(prefs)
             logger.info(f"Guest surf data ({name}): {conditions.wave_height}m waves, {conditions.wind_speed} km/h wind, rating: {rating}/10")
-            return conditions.format_overlay(prefs)
+            overlay = conditions.format_overlay(prefs)
+            overlay["timezone"] = camera.get("timezone")
+            return overlay
         except Exception as e:
             logger.error(f"Failed to fetch guest weather for {name}: {e}")
             return {"location": name}

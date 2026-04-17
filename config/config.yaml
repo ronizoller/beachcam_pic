@@ -145,6 +145,18 @@ guest_beaches:
         lat: -43.5731
         lon: 172.7636
         name: "Taylors Mistake, NZ"
+    - name: "Ko Tao"
+      # YouTube sddefault_live thumbnail (640x480, updates ~5min)
+      # UNVERIFIED — needs daytime test (Thai daytime = 5-10am Israel)
+      url: "https://img.youtube.com/vi/GF_ipELqzV4/sddefault_live.jpg"
+      type: "snapshot"
+      crop_box: [0, 62, 640, 418]  # Remove letterbox black bars
+      timezone: "Asia/Bangkok"
+      scoring_profile: "beach"
+      location:
+        lat: 10.0956
+        lon: 99.8378
+        name: "Ko Tao"
 
 # ========== AD DETECTION ==========
 filter:
