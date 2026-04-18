@@ -177,15 +177,7 @@ class BeachCamService:
             logger.debug(f"Rotated {rotation}° and trimmed borders")
             logger.debug(f"Rotated {rotation}° and trimmed borders")
 
-        # --- Step 3: Color correction (only if camera opts in) ---
-        if is_guest and camera.get("auto_color_correct", False):
-            cropped_img = self._auto_color_correct(cropped_img)
-        elif not is_guest:
-            main_camera = self.config.cameras[0] if self.config.cameras else {}
-            if main_camera.get("auto_color_correct", False):
-                cropped_img = self._auto_color_correct(cropped_img)
-
-        # --- Step 4: Filter ---
+        # --- Step 3: Filter ---
         filter_result = self.filter.filter(cropped_img)
         if not filter_result.is_valid:
             logger.warning(f"Frame rejected by filter: {filter_result.reason}")
@@ -543,29 +535,6 @@ class BeachCamService:
             return {
                 "location": weather_config.get("location", {}).get("name", "Tel Aviv"),
             }
-
-    def _auto_color_correct(self, image) -> 'Image':
-        """Fix pink/magenta tint from cameras with bad IR filters."""
-        import numpy as np
-
-        arr = np.array(image, dtype=np.float32)
-        r_mean = arr[:, :, 0].mean()
-        g_mean = arr[:, :, 1].mean()
-        b_mean = arr[:, :, 2].mean()
-
-        # Detect pink tint: red is significantly higher than green/blue
-        if r_mean > g_mean * 1.15 and r_mean > b_mean * 1.1:
-            logger.info(f"Pink tint detected (R={r_mean:.0f} G={g_mean:.0f} B={b_mean:.0f}), correcting...")
-            # Target: balanced gray world (equal channel means)
-            target = (r_mean + g_mean + b_mean) / 3
-            arr[:, :, 0] = np.clip(arr[:, :, 0] * (target / r_mean), 0, 255)
-            arr[:, :, 1] = np.clip(arr[:, :, 1] * (target / g_mean), 0, 255)
-            arr[:, :, 2] = np.clip(arr[:, :, 2] * (target / b_mean), 0, 255)
-
-            from PIL import Image as PILImage
-            return PILImage.fromarray(arr.astype(np.uint8))
-
-        return image
 
     def _get_guest_weather(self, camera: dict) -> dict:
         """Fetch weather/surf data for a guest beach location."""

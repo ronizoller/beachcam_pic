@@ -89,17 +89,16 @@ guest_beaches:
   enabled: true
   cameras:
     # --- Verified live ---
-    - name: "Supertubos"
-      url: "https://video-auth1.iol.pt/beachcam/supertubos/playlist.m3u8"
+    - name: "Baleal"
+      url: "https://video-auth1.iol.pt/beachcam/bcbalealgeral/playlist.m3u8"
       type: "hls"
-      crop_box: [0, 50, 1920, 1080]  # Remove MEO BEACHCAM watermark
-      rotation: 4.5
+      crop_box: [0, 80, 2560, 1440]  # Remove MEO BEACHCAM watermark
       timezone: "Europe/Lisbon"
       scoring_profile: "beach"
       location:
-        lat: 39.3483
-        lon: -9.3592
-        name: "Supertubos"
+        lat: 39.3725
+        lon: -9.3394
+        name: "Baleal"
     - name: "Dahab"
       url: "https://webcam.harry-nass.com/dahab-live.jpg"
       type: "snapshot"
