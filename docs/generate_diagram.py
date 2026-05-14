@@ -29,7 +29,7 @@ DARK_GRAY = (60, 60, 60)
 # Component colors
 BATTERY_COLOR = (144, 238, 144)
 TP4056_COLOR = (135, 206, 235)
-SWITCH_COLOR = (222, 184, 135)
+BOOST_COLOR = (255, 200, 120)
 ESP32_COLOR = (70, 70, 70)
 EINK_COLOR = (230, 230, 240)
 EINK_HAT_COLOR = (200, 200, 220)
@@ -103,9 +103,9 @@ def main():
     draw.line([(35, 320), (80, 320)], fill=BLUE, width=2)
     draw.polygon([(80, 320), (70, 315), (70, 325)], fill=BLUE)
 
-    # =========== SWITCH ===========
-    draw_box(draw, 100, 450, 120, 50, SWITCH_COLOR, "KCD11 Switch", "", fonts)
-    draw.text((160, 515), "ON/OFF", fill=GRAY, font=font_small, anchor="mm")
+    # =========== MT3608 BOOST ===========
+    draw_box(draw, 80, 450, 160, 70, BOOST_COLOR, "MT3608 Boost", "3.7V → 5.0V", fonts)
+    draw.text((160, 535), "set trimpot first!", fill=RED, font=font_small, anchor="mm")
 
     # =========== ESP32 ===========
     esp_x, esp_y = 380, 300
@@ -161,16 +161,18 @@ def main():
     draw.line([(160, 200), (160, 280)], fill=DARK_GRAY, width=6)
     draw.text((180, 240), "JST", fill=GRAY, font=font_small, anchor="lm")
 
-    # TP4056 OUT+ to Switch (red)
-    draw_wire(draw, [(240, 310), (280, 310), (280, 475), (220, 475)], RED, 4)
-    draw.text((285, 390), "OUT+", fill=RED, font=font_small, anchor="lm")
+    # TP4056 OUT+ to MT3608 IN+ (red)
+    draw_wire(draw, [(240, 310), (260, 310), (260, 470), (80, 470)], RED, 4)
+    draw.text((265, 390), "OUT+ → IN+", fill=RED, font=font_small, anchor="lm")
 
-    # TP4056 OUT- to ESP32 GND (black)
-    draw_wire(draw, [(240, 350), (320, 350), (320, 420), (380, 420)], BLACK, 4)
-    draw.text((325, 385), "OUT-", fill=DARK_GRAY, font=font_small, anchor="lm")
+    # TP4056 OUT- to MT3608 IN- and ESP32 GND (black)
+    draw_wire(draw, [(240, 350), (320, 350), (320, 500), (80, 500)], BLACK, 4)
+    draw_wire(draw, [(320, 350), (320, 420), (380, 420)], BLACK, 4)
+    draw.text((325, 385), "OUT- / GND", fill=DARK_GRAY, font=font_small, anchor="lm")
 
-    # Switch to ESP32 5V (red)
-    draw_wire(draw, [(220, 475), (300, 475), (300, 340), (380, 340)], RED, 4)
+    # MT3608 OUT+ to ESP32 5V (red)
+    draw_wire(draw, [(240, 470), (300, 470), (300, 340), (380, 340)], RED, 4)
+    draw.text((305, 405), "5.0V → 5V", fill=RED, font=font_small, anchor="lm")
 
     # ESP32 3V3 to E-Ink VCC (red)
     draw_wire(draw, [(380, 380), (350, 380), (350, 560), (915, 560), (915, 415)], RED, 3)
@@ -245,9 +247,11 @@ def main():
     draw.text((80, notes_y), "Notes:", fill=BLACK, font=font_medium, anchor="lm")
     notes = [
         "• Battery connects to TP4056 via JST PH2.0 connector (no soldering needed)",
-        "• Switch goes between TP4056 OUT+ and ESP32 5V pin",
+        "• MT3608 boost converts LiPo's 3.7V → 5V (LDO needs ≥4.5V to regulate)",
+        "• SET MT3608 TRIMPOT TO 5.0V WITH A MULTIMETER BEFORE CONNECTING TO ESP32",
         "• E-Ink display powered from ESP32 3V3 pin (safe 3.3V)",
         "• All SPI wires are male-to-female Dupont cables (20cm)",
+        "• To power off: unplug LiPo from TP4056 JST socket (no switch in this design)",
     ]
     for i, note in enumerate(notes):
         draw.text((80, notes_y + 20 + i * 18), note, fill=GRAY, font=font_small, anchor="lm")

@@ -10,7 +10,7 @@ This document describes all hardware connections for the Surf E-Ink Frame projec
 |-----------|-------|-------|
 | Battery | LiPo 3.7V 2000mAh | JST PH2.0 connector |
 | Charger | TP4056 USB-C | With protection circuit, PH2.0 socket |
-| Switch | KCD11 ON-OFF | 2-pin rocker switch |
+| Boost converter | MT3608 | DC-DC step-up; **set output trimpot to 5.0V before connecting** |
 | Microcontroller | ESP32 DevKitC 32U | WiFi, USB-C, 38 pins |
 | Test Display | Waveshare 1.54" E-Ink | B/W, SPI, includes HAT |
 | Production Display | Waveshare 13.3" Spectra 6 | 6-color, 1600x1200, SPI |
@@ -104,8 +104,13 @@ Use **male-to-female** Dupont wires to connect to E-Ink HAT:
 ```
 
 **Step 5: Battery power (optional, for battery test)**
-- TP4056 OUT+ → Switch → breadboard row next to ESP32 5V pin
-- TP4056 OUT- → breadboard (-) rail
+- First, set the MT3608 output to 5.0V using a multimeter. See "Setting the MT3608 Trimpot" below.
+- TP4056 OUT+ → MT3608 IN+ (red)
+- TP4056 OUT- → breadboard (-) rail and MT3608 IN- / GND (black)
+- MT3608 OUT+ → breadboard row next to ESP32 5V pin (red, **only after the trimpot is set to 5.0V**)
+- MT3608 OUT- → breadboard (-) rail (black)
+
+The LiPo's 3.0–4.2V output is too low to feed the ESP32's `5V` pin directly — the onboard 5V→3.3V LDO needs ≥4.5V to regulate. The MT3608 boosts the cell voltage to a clean 5V so the LDO has the headroom it needs.
 
 ### Breadboard vs Final Assembly
 
@@ -135,24 +140,48 @@ Use **male-to-female** Dupont wires to connect to E-Ink HAT:
 - TP4056 has JST PH2.0 female socket
 - Just plug them together
 
-### Step 2: Charger Output to Switch
+### Step 2: Charger Output to Boost Converter
 
-Connect the TP4056 positive output to the switch:
-
-| From | To | Wire Color |
-|------|----|------------|
-| TP4056 **OUT+** | Switch **pin 1** | Red |
-
-### Step 3: Switch to ESP32
-
-Connect the switch output to ESP32 power input:
+Connect the TP4056's protected output to the MT3608's input:
 
 | From | To | Wire Color |
 |------|----|------------|
-| Switch **pin 2** | ESP32 **5V** pin | Red |
-| TP4056 **OUT-** | ESP32 **GND** pin | Black |
+| TP4056 **OUT+** | MT3608 **IN+** | Red |
+| TP4056 **OUT-** | MT3608 **IN-** (GND) | Black |
 
-**Power flow:** Battery → TP4056 → Switch → ESP32
+Use the TP4056's `OUT+/OUT-` (not `BAT+/BAT-`) — `OUT-` is downstream of the protection MOSFET, so over-discharge cutoff still works.
+
+### Step 3: Boost Converter to ESP32
+
+**Set the MT3608 output to 5.0V before wiring it to the ESP32** (see "Setting the MT3608 Trimpot" below). Then:
+
+| From | To | Wire Color |
+|------|----|------------|
+| MT3608 **OUT+** | ESP32 **5V** pin | Red |
+| MT3608 **OUT-** | ESP32 **GND** pin | Black |
+
+**Power flow:** Battery → TP4056 → MT3608 boost (3.7V → 5V) → ESP32 5V pin → onboard LDO → 3.3V rail → ESP32 + E-Ink HAT
+
+### Why the MT3608 is required
+
+The LiPo cell sits between 3.0V (empty) and 4.2V (full). The ESP32's onboard 5V→3.3V LDO needs ≥4.5V on its `5V` pin to regulate. Wiring the LiPo straight to `5V` puts the LDO in dropout, the 3.3V rail floats just below the cell voltage, and the panel's DRF current spike collapses the rail into a brownout reset. The MT3608 boosts the LiPo's 3.7V to a clean 5.0V so the LDO has headroom regardless of charge state.
+
+### Setting the MT3608 Trimpot
+
+The MT3608 ships with its trimpot at a random position — often outputting 12V or higher. **Connecting it to the ESP32 in that state will instantly destroy the chip.** Always set output to 5.0V before connecting.
+
+Procedure:
+1. Wire LiPo → TP4056 → MT3608 IN. **Do NOT connect MT3608 OUT to the ESP32 yet.**
+2. Plug the LiPo into the TP4056.
+3. Place a multimeter (DC voltage mode, 20V range) on the MT3608's `OUT+` and `OUT-` pads.
+4. Turn the trimpot screw with a small Phillips driver. On most MT3608 modules, **clockwise increases output** — verify by watching the meter as you turn slightly. Some clones are reversed.
+5. Stop when the meter reads **5.00V ± 0.05V**.
+6. Unplug the LiPo. Wire MT3608 `OUT+/OUT-` to ESP32 `5V/GND`.
+7. With nothing else changed, plug the LiPo back in and probe the ESP32's `5V` pin with the meter — should still read ~5.0V. If it reads higher, the trimpot moved during wiring; redo step 5.
+
+### Why no switch
+
+Earlier revisions of this doc used a KCD11 switch between the TP4056 and the ESP32. It's been removed: the ESP32 spends >99% of its time in deep sleep (~10µA), and powering off via switch isn't necessary for daily use. To "turn the frame off" entirely, unplug the LiPo from the TP4056's JST socket. The trade-off is that the MT3608 has ~3–5mA quiescent current, so a battery left connected drains over weeks rather than indefinitely — fine for a frame that's regularly charged.
 
 ---
 
@@ -263,15 +292,22 @@ When you're ready to assemble, follow this order:
    - Connect E-Ink display to ESP32
    - Upload firmware and verify display works
 
-2. **Add battery system**
-   - Connect battery to TP4056
-   - Wire TP4056 OUT+ → Switch → ESP32 5V
-   - Wire TP4056 OUT- → ESP32 GND
-   - Test with switch ON/OFF
+2. **Set the MT3608 output to 5.0V**
+   - Wire LiPo → TP4056 → MT3608 IN. Do not connect MT3608 OUT yet.
+   - Probe MT3608 OUT+/OUT- with a multimeter.
+   - Turn the trimpot until the meter reads 5.00V ± 0.05V.
 
-3. **Final assembly**
+3. **Add battery system**
+   - Battery plugs into TP4056 (JST PH2.0, no soldering)
+   - Wire TP4056 OUT+ → MT3608 IN+ (red)
+   - Wire TP4056 OUT- → MT3608 IN- and ESP32 GND (black)
+   - Wire MT3608 OUT+ → ESP32 5V pin (red)
+   - Plug the LiPo back in and verify the ESP32 boots normally
+
+4. **Final assembly**
    - Mount everything in picture frame
    - Ensure USB-C port on TP4056 is accessible for charging
+   - To "power off" the frame entirely, unplug the LiPo from the TP4056's JST socket
 
 ---
 
@@ -294,8 +330,8 @@ When you're ready to assemble, follow this order:
 
 **Left side pins used:**
 - 3V3 → E-Ink VCC (red wire)
-- GND → E-Ink GND, TP4056 OUT-, Speaker (-) (black wires)
-- 5V ← From switch (red wire, power input)
+- GND → E-Ink GND, MT3608 OUT-, Speaker (-) (black wires)
+- 5V ← From MT3608 OUT+ (red wire, power input)
 - GPIO25 → 220ohm resistor → Speaker (+)
 
 **Right side pins used:**
@@ -321,9 +357,11 @@ When you're ready to assemble, follow this order:
 - Check wire connections aren't loose
 
 ### ESP32 won't power from battery
-- Is the switch ON?
 - Is the battery charged? (charge via TP4056 USB-C)
-- Check OUT+/OUT- connections from TP4056
+- Check OUT+/OUT- connections from TP4056 → MT3608 IN+/IN-
+- Verify MT3608 output is ~5.0V with a multimeter (probes on OUT+/OUT-)
+- If MT3608 output is wrong, redo the trimpot setting procedure
+- Confirm the MT3608's onboard LED lights up when battery is plugged in
 
 ### WiFi connection fails
 - Verify credentials in `credentials.h`
@@ -338,7 +376,8 @@ When you're ready to assemble, follow this order:
 |-------|---------|-------|
 | Battery full | 4.2V | Freshly charged |
 | Battery nominal | 3.7V | Normal operation |
-| Battery empty | 3.3V | TP4056 cuts off below this |
+| Battery empty | ~2.4V | Protection MOSFET cuts off here (DW01 default) |
+| MT3608 output | 5.0V | Set via trimpot, feeds ESP32 5V pin |
 | ESP32 3V3 output | ~3.3V | From onboard regulator |
 | E-Ink VCC | 3.3V | Safe for display |
 

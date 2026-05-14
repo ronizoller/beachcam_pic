@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, List
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from config import get_config
 
@@ -27,14 +27,24 @@ PALETTES = {
         (170, 120, 100),    # Muted terracotta
         (130, 130, 130),    # Gray
     ],
-    # 6-color E-Ink (Spectra 6): actual display colors
+    # 6-color E-Ink (Spectra 6): calibrated to what the panel actually displays
+    # rather than RGB primaries. PIL's quantize() picks the nearest palette
+    # entry by RGB distance, so using pure primaries makes most natural pixels
+    # snap to white/black (e.g. a sky-blue pixel is closer to white than to
+    # (0,0,255)). Calibrated values keep the chromatic colors in play and the
+    # output looks much more saturated. Tweak to taste — these are a starting
+    # estimate based on typical Spectra 6 measurements.
     "6color": [
-        (0, 0, 0),          # Black
-        (255, 255, 255),    # White
-        (0, 0, 255),        # Blue (pure E-Ink blue)
-        (255, 255, 0),      # Yellow (sand/sun)
-        (255, 0, 0),        # Red
-        (0, 255, 0),        # Green
+        (15, 15, 15),       # Black (panel renders very dark gray, not pure black)
+        (235, 230, 220),    # White (paper-like, slightly warm)
+        (40, 70, 150),      # Blue (muted, not saturated primary)
+        (225, 185, 55),     # Yellow (mustard, not bright cyan-yellow)
+        (215, 75, 60),      # Red — bumped lighter/warmer so pink/salmon/peach
+                            # pixels (Dahab rocks, sunset, terracotta) map to
+                            # red instead of yellow. Doesn't change what the
+                            # panel renders — just expands red's territory in
+                            # the nearest-color quantizer.
+        (35, 140, 75),      # Green (forest, not bright green)
     ],
     # 5-color palette (simpler)
     "5color": [
@@ -57,6 +67,25 @@ PALETTES = {
     ],
 }
 
+# Index of each color name within the 6color palette, for profile overrides.
+_COLOR_IDX = {"black": 0, "white": 1, "blue": 2, "yellow": 3, "red": 4, "green": 5}
+
+# Per-camera-profile palette tweaks. Keyed by the camera's `scoring_profile`
+# in config.yaml. Each entry overrides one or more palette colors only for
+# that profile — other cameras still use the default 6color palette above.
+# Use this to shift quantization boundaries for a specific scene's color
+# distribution (more sky/sea pixels into blue, less into green, etc.).
+PROFILE_OVERRIDES = {
+    "jaffa": {
+        # Tel Aviv shoreline: too many teal/cyan sea pixels were quantizing
+        # to green. Lift blue lighter & more chromatic so it captures more
+        # sea/sky, and shift green to a more "pure" green (less cyan/blue
+        # component) so its territory in color space narrows.
+        "blue":  (45, 95, 175),    # was (40, 70, 150)
+        "green": (30, 135, 60),    # was (35, 140, 75)
+    },
+}
+
 
 class Processor:
     """Processes images for E-Ink display with smooth, print-like output."""
@@ -68,14 +97,17 @@ class Processor:
         self,
         image: Image.Image,
         weather_data: dict = None,
+        color_profile: str = None,
     ) -> Image.Image:
         """
         Process image for E-Ink display.
 
         Pipeline:
-        1. Resize to display dimensions
+        1. Resize to working canvas (landscape if rotation is 90/270, else portrait)
         2. Add overlay (before dithering for transparency effect)
         3. Color reduction with PIL dithering
+        4. Rotate to match panel mount + vertical flip to compensate for the
+           firmware's bottom-up BMP read order.
 
         Args:
             image: Input PIL Image.
@@ -87,28 +119,75 @@ class Processor:
         display = self.config.display
         overlay_config = self.config.overlay
 
-        # Get settings
-        width = display.get("width", 800)
-        height = display.get("height", 480)
+        panel_w = display.get("width", 800)
+        panel_h = display.get("height", 480)
+        rotation = int(display.get("rotation", 0)) % 360
         color_mode = display.get("color_mode", "7color")
         dithering = display.get("dithering", True)
+        saturation = float(display.get("saturation", 1.0))
+        contrast = float(display.get("contrast", 1.0))
 
-        # Step 1: Resize
-        img = self._resize(image, width, height)
-        logger.debug(f"Resized to {width}x{height}")
+        # If the panel is mounted rotated 90° (CW or CCW), render against a
+        # landscape canvas so the overlay text and aspect ratio look right
+        # from the viewer's perspective; the rotation step below will fit
+        # this canvas back into the panel's native portrait pixel grid.
+        if rotation in (90, 270):
+            canvas_w, canvas_h = panel_h, panel_w
+        else:
+            canvas_w, canvas_h = panel_w, panel_h
 
-        # Step 2: Add overlay BEFORE dithering (for semi-transparent pill effect)
+        img = self._resize(image, canvas_w, canvas_h)
+        logger.debug(f"Resized to {canvas_w}x{canvas_h} (rotation={rotation})")
+
+        # Saturation/contrast boost — applied to the photo BEFORE the overlay
+        # so the neutral-gray pills aren't pushed off-color. With only 6
+        # palette entries, muted source pixels tend to snap toward white/black
+        # rather than the chromatic colors; bumping saturation pulls them
+        # toward red/yellow/blue/green and makes the panel use its full gamut.
+        if saturation != 1.0:
+            img = ImageEnhance.Color(img).enhance(saturation)
+            logger.debug(f"Saturation x{saturation}")
+        if contrast != 1.0:
+            img = ImageEnhance.Contrast(img).enhance(contrast)
+            logger.debug(f"Contrast x{contrast}")
+
         if overlay_config.get("enabled", True) and weather_data:
             img = self._add_pill_overlay(img, weather_data, overlay_config)
             logger.debug("Added overlay")
 
-        # Step 4: Color reduction with PIL dithering
         import time as _time
         t0 = _time.time()
-        img = self._reduce_colors(img, color_mode, dithering)
+        img = self._reduce_colors(img, color_mode, dithering, color_profile)
         dt = _time.time() - t0
-        logger.info(f"Dithering: {color_mode} palette, method=PIL, time={dt:.2f}s")
+        logger.info(f"Dithering: {color_mode} palette, profile={color_profile or 'default'}, time={dt:.2f}s")
 
+        img = self._orient_for_panel(img, rotation, panel_w, panel_h)
+        return img
+
+    def _orient_for_panel(
+        self, img: Image.Image, rotation: int, panel_w: int, panel_h: int,
+    ) -> Image.Image:
+        """
+        Rotate the rendered image to match the panel's physical mount, then
+        flip vertically so PIL's bottom-up BMP storage decodes upright on the
+        firmware side. The firmware reads rows in storage order (file row 0 =
+        visual bottom of saved image) and sends them top-to-bottom on the
+        panel, so flipping here cancels that out.
+        """
+        if rotation == 90:
+            img = img.transpose(Image.ROTATE_270)   # 90° CW
+        elif rotation == 180:
+            img = img.transpose(Image.ROTATE_180)
+        elif rotation == 270:
+            img = img.transpose(Image.ROTATE_90)    # 90° CCW
+
+        if img.size != (panel_w, panel_h):
+            raise ValueError(
+                f"Oriented image is {img.size}, expected {(panel_w, panel_h)} "
+                f"for rotation={rotation}"
+            )
+
+        img = img.transpose(Image.FLIP_TOP_BOTTOM)
         return img
 
     def _resize(self, image: Image.Image, width: int, height: int) -> Image.Image:
@@ -136,9 +215,10 @@ class Processor:
 
     def _reduce_colors(
         self, image: Image.Image, color_mode: str, dithering: bool,
+        color_profile: str = None,
     ) -> Image.Image:
         """Reduce image colors to E-Ink palette using PIL's built-in dithering."""
-        palette = PALETTES.get(color_mode, PALETTES["5color"])
+        palette = self._palette_for(color_mode, color_profile)
 
         if dithering:
             pal_img = Image.new('P', (1, 1))
@@ -148,6 +228,18 @@ class Processor:
             return quantized.convert('RGB')
         else:
             return self._nearest_color(image, palette)
+
+    def _palette_for(
+        self, color_mode: str, color_profile: str = None,
+    ) -> List[Tuple[int, int, int]]:
+        """Return the palette for `color_mode`, with per-profile overrides applied."""
+        base = list(PALETTES.get(color_mode, PALETTES["5color"]))
+        overrides = PROFILE_OVERRIDES.get(color_profile or "", {})
+        for name, rgb in overrides.items():
+            idx = _COLOR_IDX.get(name)
+            if idx is not None and idx < len(base):
+                base[idx] = rgb
+        return base
 
     def _nearest_color(
         self, image: Image.Image, palette: List[Tuple[int, int, int]]

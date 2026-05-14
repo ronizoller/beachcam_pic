@@ -223,11 +223,14 @@ class BeachCamService:
         # Get weather for the right location
         if best.get("guest") and best.get("guest_camera"):
             weather_data = self._get_guest_weather(best["guest_camera"])
+            color_profile = best["guest_camera"].get("scoring_profile")
         else:
             weather_data = self._get_weather_data()
+            main_camera = self.config.cameras[0] if self.config.cameras else {}
+            color_profile = main_camera.get("scoring_profile")
 
         # --- Step 8: Process for E-Ink (resize, preprocess, dither, overlay) ---
-        processed_img = self.processor.process(best_img, weather_data)
+        processed_img = self.processor.process(best_img, weather_data, color_profile=color_profile)
 
         # --- Step 9: Save ---
         output_path = self.data_dir / "current.bmp"

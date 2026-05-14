@@ -5,11 +5,12 @@ Provides /image, /hash, and /metadata endpoints.
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from threading import Thread
 from typing import Optional
 
-from flask import Flask, send_file, jsonify, Response
+from flask import Flask, request, send_file, jsonify, Response
 
 from config import get_config
 
@@ -30,14 +31,40 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
     image_path = data_dir / "current.bmp"
     metadata_path = data_dir / "metadata.json"
 
+    clear_marker = data_dir / "clear_requested"
+
     @app.route("/")
     def index():
         """Health check endpoint."""
         return jsonify({
             "status": "ok",
             "service": "beachcam",
-            "endpoints": ["/image", "/hash", "/metadata", "/preview", "/raw", "/sleep", "/guest"]
+            "endpoints": ["/image", "/hash", "/metadata", "/preview", "/raw", "/sleep", "/guest", "/mode", "/clear", "/clear/done"]
         })
+
+    @app.route("/mode")
+    def get_mode():
+        """Tell the ESP what to do this wake: render an image, or run a
+        maintenance clear cycle (panel storage hygiene)."""
+        if clear_marker.exists():
+            return jsonify({"mode": "clear"})
+        return jsonify({"mode": "image"})
+
+    @app.route("/clear", methods=["POST"])
+    def post_clear():
+        """Request the ESP to clear the panel on its next wake. Marker stays
+        until the ESP explicitly acks via /clear/done — so a brownout-aborted
+        clear retries on the next wake instead of being silently lost."""
+        clear_marker.touch()
+        return jsonify({"status": "clear requested", "next_wake": "ESP will clear and ack"})
+
+    @app.route("/clear/done", methods=["POST"])
+    def post_clear_done():
+        """ESP acks a successful clear cycle — remove the marker so the next
+        wake goes back to normal image rendering."""
+        if clear_marker.exists():
+            clear_marker.unlink()
+        return jsonify({"status": "ok"})
 
     @app.route("/image")
     def get_image():
@@ -123,6 +150,21 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
         if get_guest_info:
             return jsonify(get_guest_info())
         return jsonify({"status": "no guest info available"})
+
+    @app.route("/log", methods=["POST"])
+    def post_log():
+        """Accept a serial log dump from the ESP32 and append to esp.log.
+        Each POST is timestamped; tail with `tail -f data/esp.log`."""
+        body = request.get_data(as_text=True)
+        if not body:
+            return Response("", status=204)
+        log_path = data_dir / "esp.log"
+        with open(log_path, "a") as f:
+            f.write(f"\n--- {datetime.utcnow().isoformat()}Z ---\n")
+            f.write(body)
+            if not body.endswith("\n"):
+                f.write("\n")
+        return Response("", status=204)
 
     @app.route("/sleep")
     def get_sleep():

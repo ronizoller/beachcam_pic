@@ -48,12 +48,28 @@ timing:
 
 # ========== DISPLAY (E-Ink) ==========
 display:
-  width: 1600
-  height: 1200
+  width: 1200
+  height: 1600
   # Color modes: "7color", "6color", "5color", "3color", "bw"
   color_mode: "6color"
   # Dithering: true = detail with some noise, false = flat/posterized
   dithering: true
+  # Rotation (degrees, clockwise) applied to the rendered image to compensate
+  # for how the panel is physically mounted. The Waveshare 13.3" HAT is
+  # native-portrait with the USB connector at the bottom; if you mount the
+  # panel landscape with USB on the left (90° CCW rotation in viewer's frame),
+  # set this to 90 so the image rotates 90° CW to appear upright. Use 270 if
+  # the image comes out upside-down. Valid: 0, 90, 180, 270.
+  rotation: 90
+  # Color preprocessing applied before dithering. Spectra 6 only has 6 palette
+  # entries, so muted source pixels (overcast skies, beige sand, faded rocks)
+  # tend to quantize to white/black instead of using the chromatic colors.
+  # Boosting saturation pulls those toward red/yellow/blue/green so the panel
+  # uses more of its gamut. Contrast boost helps separate sky/sea/sand into
+  # distinct quantized regions instead of a mid-tone mush. 1.0 = no change.
+  # Tune in increments of 0.1; values above 1.7 typically over-saturate.
+  saturation: 1.4
+  contrast: 1.1
 
 # ========== OVERLAY ==========
 # Minimal text overlay on image (not a separate bar)
