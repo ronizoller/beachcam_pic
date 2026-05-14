@@ -27,7 +27,11 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
     app = Flask(__name__)
     config = get_config()
 
-    data_dir = Path(config.paths.get("data_dir", "./data"))
+    # Resolve to absolute now: Flask's send_file() interprets relative paths
+    # against app.root_path (the dir of this file), not the process cwd, which
+    # would point at pi/data/ instead of the project's data/ where the
+    # fetcher writes.
+    data_dir = Path(config.paths.get("data_dir", "./data")).resolve()
     image_path = data_dir / "current.bmp"
     metadata_path = data_dir / "metadata.json"
 
