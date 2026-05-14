@@ -4,7 +4,7 @@ Supports:
 - Direct snapshot URLs (simple HTTP GET)
 - HLS streams (via ffmpeg frame grab)
 - YouTube live streams (HLS extraction + thumbnail fallback)
-- WebRTC streams (via Playwright headless browser)
+- EarthCam streams (HLS extraction via ffmpeg)
 """
 
 import logging
@@ -16,7 +16,6 @@ from typing import Optional
 from urllib.parse import urlparse, urlencode, urlunparse, parse_qs
 
 import requests
-from playwright.sync_api import sync_playwright, Browser, Page
 
 from config import get_config
 
@@ -34,36 +33,10 @@ class FetchResult:
 
 
 class Fetcher:
-    """Fetches frames from beach cameras using headless browser."""
+    """Fetches frames from beach cameras."""
 
     def __init__(self):
         self.config = get_config()
-        self._browser: Optional[Browser] = None
-        self._playwright = None
-
-    def _ensure_browser(self):
-        """Start browser if not already running."""
-        if self._browser is None:
-            self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--autoplay-policy=no-user-gesture-required",
-                    "--disable-web-security",
-                    "--disable-features=VizDisplayCompositor",
-                ]
-            )
-            logger.info("Browser started")
-
-    def close(self):
-        """Close browser and cleanup."""
-        if self._browser:
-            self._browser.close()
-            self._browser = None
-        if self._playwright:
-            self._playwright.stop()
-            self._playwright = None
-            logger.info("Browser closed")
 
     def fetch_frame(self, camera: dict = None) -> FetchResult:
         """
@@ -81,7 +54,7 @@ class Fetcher:
                 return FetchResult(success=False, error="No cameras configured")
             camera = cameras[0]
 
-        camera_type = camera.get("type", "webrtc")
+        camera_type = camera.get("type", "snapshot")
 
         # Route to appropriate fetcher based on camera type
         if camera_type == "snapshot":
@@ -93,7 +66,11 @@ class Fetcher:
         elif camera_type == "earthcam":
             return self._fetch_earthcam(camera)
         else:
-            return self._fetch_webrtc(camera)
+            return FetchResult(
+                success=False,
+                camera_name=camera.get("name"),
+                error=f"Unknown camera type: {camera_type}",
+            )
 
     def _fetch_snapshot(self, camera: dict) -> FetchResult:
         """Fetch a direct image snapshot via HTTP GET."""
@@ -428,80 +405,6 @@ class Fetcher:
             logger.error(f"Failed to fetch EarthCam {camera_name}: {e}")
             return FetchResult(success=False, camera_name=camera_name, error=str(e))
 
-    def _fetch_webrtc(self, camera: dict) -> FetchResult:
-        """Fetch a frame from WebRTC stream using headless browser."""
-        camera_name = camera.get("name", "Unknown")
-        url = camera.get("url")
-        wait_seconds = camera.get("wait_seconds", 5)
-
-        if not url:
-            return FetchResult(success=False, error=f"No URL for camera {camera_name}")
-
-        logger.info(f"Fetching WebRTC frame from: {camera_name}")
-
-        try:
-            self._ensure_browser()
-            page = self._browser.new_page(
-                viewport={"width": 1920, "height": 1080}
-            )
-
-            # Navigate to camera page
-            page.goto(url, wait_until="networkidle", timeout=30000)
-
-            # Wait for video stream to load
-            logger.debug(f"Waiting {wait_seconds}s for stream to load...")
-            page.wait_for_timeout(wait_seconds * 1000)
-
-            # Try to find and wait for video/iframe element
-            self._wait_for_video(page)
-
-            # Take screenshot
-            output_dir = Path(self.config.paths.get("data_dir", "./data"))
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.now()
-            raw_path = output_dir / "current_raw.png"
-
-            page.screenshot(path=str(raw_path), full_page=False)
-            logger.info(f"Screenshot saved: {raw_path}")
-
-            page.close()
-
-            return FetchResult(
-                success=True,
-                image_path=str(raw_path),
-                camera_name=camera_name,
-                timestamp=timestamp,
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to fetch from {camera_name}: {e}")
-            return FetchResult(success=False, camera_name=camera_name, error=str(e))
-
-    def _wait_for_video(self, page: Page):
-        """Wait for video element to be visible and playing."""
-        try:
-            # Try to find video element (direct or in iframe)
-            video_selectors = [
-                "video",
-                "iframe",
-                "#cam",
-                ".video-container",
-                "canvas",
-            ]
-            for selector in video_selectors:
-                try:
-                    element = page.wait_for_selector(selector, timeout=5000)
-                    if element:
-                        logger.debug(f"Found video element: {selector}")
-                        # Wait a bit more for video to actually play
-                        page.wait_for_timeout(2000)
-                        return
-                except:
-                    continue
-        except Exception as e:
-            logger.warning(f"Could not find video element: {e}")
-
     def fetch_with_fallback(self) -> FetchResult:
         """
         Try to fetch from cameras in priority order.
@@ -525,11 +428,7 @@ class Fetcher:
 # Convenience function for one-shot fetching
 def fetch_frame() -> FetchResult:
     """Fetch a single frame from the configured camera."""
-    fetcher = Fetcher()
-    try:
-        return fetcher.fetch_with_fallback()
-    finally:
-        fetcher.close()
+    return Fetcher().fetch_with_fallback()
 
 
 if __name__ == "__main__":

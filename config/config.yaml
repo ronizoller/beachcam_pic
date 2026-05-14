@@ -14,23 +14,6 @@ cameras:
     crop_box: [0, 80, 1920, 1080]
     wait_seconds: 0
 
-  # Keep Hamaaravi as fallback (might come back online)
-  - name: "Tel Aviv - Hamaaravi Beach"
-    url: "https://beachcam.co.il/hamaaravi.html"
-    enabled: false  # Disabled - gocamstream is down
-    priority: 2
-    type: "webrtc"
-    crop_box: null
-    wait_seconds: 15
-
-  # Add more cameras as fallback
-  # - name: "Tel Aviv - Gordon Beach"
-  #   url: "https://example.com/gordon"
-  #   enabled: false
-  #   priority: 2
-  #   type: "webrtc"
-  #   crop_box: [100, 50, 1800, 950]
-
 # ========== TIMING ==========
 timing:
   fetch_interval_minutes: 5

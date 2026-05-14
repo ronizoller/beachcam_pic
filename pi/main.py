@@ -661,7 +661,6 @@ class BeachCamService:
         """Handle shutdown signal."""
         logger.info("Shutting down...")
         self._running = False
-        self.fetcher.close()
         sys.exit(0)
 
 
@@ -718,13 +717,11 @@ def main():
         service._guest_today = {"date": datetime.now().strftime("%Y-%m-%d"), "camera": match}
         service._guest_active = True
         success = service.fetch_and_process()
-        service.fetcher.close()
         sys.exit(0 if success else 1)
 
     elif args.once:
         # Single fetch
         success = service.fetch_and_process()
-        service.fetcher.close()
         sys.exit(0 if success else 1)
 
     elif args.server:

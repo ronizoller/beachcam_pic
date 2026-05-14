@@ -1,8 +1,5 @@
 # Surf E-Ink Frame - Python Dependencies
 
-# Web scraping (for WebRTC camera capture)
-playwright>=1.40.0
-
 # Image processing
 Pillow>=10.0.0
 numpy>=1.24.0
