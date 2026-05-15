@@ -51,8 +51,8 @@ display:
   # uses more of its gamut. Contrast boost helps separate sky/sea/sand into
   # distinct quantized regions instead of a mid-tone mush. 1.0 = no change.
   # Tune in increments of 0.1; values above 1.7 typically over-saturate.
-  saturation: 1.4
-  contrast: 1.1
+  saturation: 1.2
+  contrast: 1.0
 
 # ========== OVERLAY ==========
 # Minimal text overlay on image (not a separate bar)
