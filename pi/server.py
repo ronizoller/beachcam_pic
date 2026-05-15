@@ -94,16 +94,32 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
     def get_preview():
         """
         Get preview image (PNG for browser viewing).
-        Same as /image but in PNG format.
+
+        Returns the same data as /image but in PNG, and with the panel-orientation
+        transforms (rotation + bottom-up flip) reversed so the image appears upright
+        in a browser. The on-disk BMP is stored in the panel's native orientation so
+        the firmware can stream it row-by-row; humans want the original landscape.
         """
         if not image_path.exists():
             return Response("No image available", status=404)
 
-        # Convert BMP to PNG on-the-fly for browser preview
         from PIL import Image
         import io
 
         img = Image.open(image_path)
+
+        # Reverse the storage flip first (it was applied last by the processor).
+        img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        # Then reverse the panel-mount rotation. Each case is the inverse of the
+        # rotation applied in Processor._orient_for_panel.
+        rotation = int(config.display.get("rotation", 0)) % 360
+        if rotation == 90:
+            img = img.transpose(Image.ROTATE_90)    # undo 90° CW
+        elif rotation == 180:
+            img = img.transpose(Image.ROTATE_180)
+        elif rotation == 270:
+            img = img.transpose(Image.ROTATE_270)   # undo 90° CCW
+
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         buffer.seek(0)
