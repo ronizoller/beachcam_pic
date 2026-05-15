@@ -67,7 +67,7 @@
 
 // ============== CONFIGURATION ==============
 
-const char* SERVER_BASE = "http://192.168.1.35:8080";
+const char* SERVER_BASE = "http://192.168.1.77:8080";
 
 #define FALLBACK_SLEEP_MINUTES 30
 #define uS_TO_S_FACTOR         1000000ULL
