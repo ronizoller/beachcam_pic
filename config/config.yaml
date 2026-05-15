@@ -53,6 +53,11 @@ display:
   # Tune in increments of 0.1; values above 1.7 typically over-saturate.
   saturation: 1.2
   contrast: 1.0
+  # Pre-quantize brightness multiplier (1.0 = no change). Shifts the whole
+  # image brighter before color reduction so fewer mid-tone pixels collapse
+  # to black. Combine sparingly with palette tweaks — overshoot here causes
+  # bright pixels to clip into the saturated edges of the palette.
+  brightness: 1.1
 
 # ========== OVERLAY ==========
 # Minimal text overlay on image (not a separate bar)

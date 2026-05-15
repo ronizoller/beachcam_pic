@@ -35,9 +35,14 @@ PALETTES = {
     # output looks much more saturated. Tweak to taste — these are a starting
     # estimate based on typical Spectra 6 measurements.
     "6color": [
-        (15, 15, 15),       # Black (panel renders very dark gray, not pure black)
+        (40, 40, 40),       # Black anchor pulled brighter so the equidistant
+                            # plane between black and white shifts up; fewer
+                            # mid-gray pixels (shadows, dim sky) collapse to
+                            # black. Still maps to panel BLACK in firmware
+                            # (its check is brightness < 50).
         (235, 230, 220),    # White (paper-like, slightly warm)
-        (40, 70, 150),      # Blue (muted, not saturated primary)
+        (40, 70, 150),      # Blue (muted default, not saturated primary —
+                            # most cameras override this via PROFILE_OVERRIDES)
         (225, 185, 55),     # Yellow (mustard, not bright cyan-yellow)
         (215, 75, 60),      # Red — bumped lighter/warmer so pink/salmon/peach
                             # pixels (Dahab rocks, sunset, terracotta) map to
@@ -83,8 +88,11 @@ PROFILE_OVERRIDES = {
         # in color space shrinks further. Each tweak shifts the equidistant
         # boundary between blue and green by tens of points in RGB space —
         # small numeric changes have visible effects on the panel.
-        "blue":  (55, 115, 175),   # was (45, 95, 175) — more cyan-leaning
-        "green": (40, 130, 45),    # was (30, 135, 60) — less cyan, more pure-mid-green
+        "blue":  (75, 140, 195),   # brighter + more cyan-leaning; pulls more
+                                   # teal sea pixels in, and the blue itself
+                                   # has higher luminance (~137) so renders
+                                   # less dim on the panel
+        "green": (40, 130, 45),    # less cyan, more pure-mid-green
     },
 }
 
@@ -128,6 +136,7 @@ class Processor:
         dithering = display.get("dithering", True)
         saturation = float(display.get("saturation", 1.0))
         contrast = float(display.get("contrast", 1.0))
+        brightness = float(display.get("brightness", 1.0))
 
         # If the panel is mounted rotated 90° (CW or CCW), render against a
         # landscape canvas so the overlay text and aspect ratio look right
@@ -152,6 +161,9 @@ class Processor:
         if contrast != 1.0:
             img = ImageEnhance.Contrast(img).enhance(contrast)
             logger.debug(f"Contrast x{contrast}")
+        if brightness != 1.0:
+            img = ImageEnhance.Brightness(img).enhance(brightness)
+            logger.debug(f"Brightness x{brightness}")
 
         if overlay_config.get("enabled", True) and weather_data:
             img = self._add_pill_overlay(img, weather_data, overlay_config)
