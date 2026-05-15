@@ -34,16 +34,27 @@ SCORING_PROFILES = {
 }
 
 
-def score_frame(image: Image.Image, profile: str = "jaffa") -> float:
+def score_frame(
+    image: Image.Image,
+    profile: str = "jaffa",
+    golden_hour: bool = False,
+) -> float:
     """
     Score a frame's composition quality.
 
     Args:
         image: PIL Image to score.
         profile: Scoring profile name ("jaffa" or "beach").
+        golden_hour: If True, add a sunset/sunrise bonus on top of the base
+            profile score. The bonus rewards warm-colored skies and is meant
+            to be enabled only inside the sunrise/sunset window so the
+            "goodnight image" served overnight has a chance to win against
+            high-scoring daytime frames still in the candidate pool.
 
     Returns:
-        Score between 0.0 (worst) and 1.0 (best).
+        Score, typically 0.0–1.0 but may exceed 1.0 when golden_hour=True
+        and the frame has strong sunset characteristics. The selector just
+        picks the maximum so the absolute scale doesn't matter.
     """
     cfg = SCORING_PROFILES.get(profile, SCORING_PROFILES["jaffa"])
     img = image.convert("RGB")
@@ -52,9 +63,24 @@ def score_frame(image: Image.Image, profile: str = "jaffa") -> float:
     method = cfg.get("method", "composition")
 
     if method == "zones":
-        return _score_zones(arr, cfg, profile)
+        base = _score_zones(arr, cfg, profile)
     else:
-        return _score_composition(arr, cfg, profile)
+        base = _score_composition(arr, cfg, profile)
+
+    if not golden_hour:
+        return base
+
+    bonus = _golden_hour_bonus(arr)
+    # Additive with a fixed weight. A perfect warm sky adds 0.5 — strong
+    # enough to outscore typical daytime frames (which sit around 0.2–0.5
+    # base) without making mediocre warm scenes always win.
+    weighted = bonus * 0.5
+    final = base + weighted
+    logger.info(
+        f"Golden-hour scoring [{profile}]: base={base:.3f}, "
+        f"warm_sky_bonus={bonus:.3f} (weighted {weighted:.3f}), final={final:.3f}"
+    )
+    return final
 
 
 def _score_zones(arr: np.ndarray, cfg: dict, profile: str) -> float:
@@ -94,6 +120,37 @@ def _score_composition(arr: np.ndarray, cfg: dict, profile: str) -> float:
         f"buildings={buildings_pct:.0%})"
     )
     return score
+
+
+# --- Golden-hour bonus (used during sunrise/sunset window) ---
+
+def _golden_hour_bonus(arr: np.ndarray) -> float:
+    """
+    Detect warm-colored sky in the upper half of the frame.
+
+    Sunset/sunrise skies are dominated by warm hues — orange/red/pink/gold —
+    in the top portion of the image. This counts how much of the sky region
+    looks like a real golden-hour sky vs. ordinary daytime blue or gray.
+
+    Returns:
+        Bonus between 0.0 (no warm sky) and 1.0 (sky completely warm-colored).
+    """
+    h = arr.shape[0]
+    sky = arr[:int(h * 0.50), :, :]  # upper half = where sky lives
+    r, g, b = sky[:, :, 0], sky[:, :, 1], sky[:, :, 2]
+
+    # Warm: R clearly dominates B, with G in between (sunset gradient).
+    # Brightness floor (r > 100) avoids counting dark dim regions.
+    is_warm = (r > b + 40) & (r > g + 5) & (r > 100)
+    warm_pct = float(np.sum(is_warm)) / r.size
+
+    # Map warm fraction to bonus. Below 10% = no real golden-hour scene
+    # (ignore stray warm reflections). 10–60% = ramp up. Above 60% = 1.0.
+    if warm_pct < 0.10:
+        return 0.0
+    if warm_pct >= 0.60:
+        return 1.0
+    return (warm_pct - 0.10) / 0.50
 
 
 # --- Zone-based detection functions (Jaffa profile) ---

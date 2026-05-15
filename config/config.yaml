@@ -29,6 +29,15 @@ timing:
     timezone: "Asia/Jerusalem"
     # End time is automatically set to sunset (fetched daily from Open-Meteo)
 
+  # Inside ±N minutes of actual sunrise OR sunset, the scorer adds a warm-sky
+  # bonus on top of the base profile score. The "goodnight image" served on
+  # the panel all night long needs to be picked from this window — boosting
+  # warm-colored frames here makes the bonus strong enough to outscore
+  # high-composition daytime frames still in the candidate pool. The ESP32
+  # sleep schedule also targets sunset+20 (= raw sunset + the window pad)
+  # for one final wake to grab the locked-in goodnight image.
+  golden_hour_window_minutes: 15
+
 # ========== DISPLAY (E-Ink) ==========
 display:
   width: 1200

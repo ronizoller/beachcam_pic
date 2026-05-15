@@ -188,7 +188,12 @@ class BeachCamService:
         else:
             main_camera = self.config.cameras[0] if self.config.cameras else {}
             scoring_profile = main_camera.get("scoring_profile", "jaffa")
-        score = score_frame(cropped_img, profile=scoring_profile)
+        # Inside ±N min of actual sunrise/sunset, add a warm-sky bonus on top
+        # of the base profile so golden-hour frames can outscore daytime
+        # candidates still in the pool — this is what locks in the "goodnight
+        # image" the panel shows all night.
+        golden = self._is_golden_hour()
+        score = score_frame(cropped_img, profile=scoring_profile, golden_hour=golden)
 
         # --- Step 6: Save candidate ---
         candidate_path = self.candidates_dir / f"candidate_{len(self._candidates):03d}.png"
@@ -412,33 +417,77 @@ class BeachCamService:
     def _get_sleep_minutes(self) -> int:
         """Calculate how long ESP32 should sleep.
 
-        During active hours: normal interval (e.g. 30 min).
-        At night: minutes until next sunrise.
+        During the day: default interval (30 min), but capped so the ESP wakes
+        exactly at sunset+20 — that's the "goodnight grab" wake, where it pulls
+        the final locked-in sunset image that stays on the panel all night.
+
+        At night (after sunset+20): until next sunrise.
         """
-        default = self.config.timing.get("esp_sleep_minutes", 30)
+        default = int(self.config.timing.get("esp_sleep_minutes", 30))
 
-        if self._is_active_time():
-            logger.debug(f"ESP32 sleep: {default}min (active hours)")
-            return default
-
-        # Night time — calculate minutes until sunrise
         active_hours = self.config.timing.get("active_hours", {})
-        tz_name = active_hours.get("timezone", "UTC")
-        tz = pytz.timezone(tz_name)
+        tz = pytz.timezone(active_hours.get("timezone", "UTC"))
         now = datetime.now(tz)
 
         sun_times = self._get_sun_times()
-        sunrise_str = sun_times.get("sunrise") or active_hours.get("start", "06:00")
-        sunrise_hour, sunrise_min = map(int, sunrise_str.split(":"))
+        sunset_raw = sun_times.get("sunset_raw")
+        sunrise_raw = sun_times.get("sunrise_raw") or active_hours.get("start", "06:00")
 
-        # Next sunrise is tomorrow if we're past it today
-        next_sunrise = now.replace(hour=sunrise_hour, minute=sunrise_min, second=0)
+        # Compute the "goodnight grab" target: sunset + 20 min (today, in local tz).
+        goodnight_target = None
+        if sunset_raw:
+            h, m = map(int, sunset_raw.split(":"))
+            goodnight_target = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(minutes=20)
+
+        # If goodnight_target is still in the future today, sleep toward it.
+        # min() caps daytime cycles at default 30; max() floors at 5 min so we
+        # never tell the ESP to wake almost immediately.
+        if goodnight_target and now < goodnight_target:
+            minutes_to_target = (goodnight_target - now).total_seconds() / 60
+            sleep = max(5, min(default, int(minutes_to_target)))
+            logger.info(
+                f"ESP32 sleep: {sleep}min (next wake at most {minutes_to_target:.0f}min away, "
+                f"goodnight target {goodnight_target.strftime('%H:%M')})"
+            )
+            return sleep
+
+        # Past today's sunset+20 — sleep until tomorrow's sunrise.
+        sunrise_hour, sunrise_min = map(int, sunrise_raw.split(":"))
+        next_sunrise = now.replace(hour=sunrise_hour, minute=sunrise_min, second=0, microsecond=0)
         if next_sunrise <= now:
             next_sunrise += timedelta(days=1)
-
         minutes = int((next_sunrise - now).total_seconds() / 60)
-        logger.info(f"ESP32 night sleep: {minutes}min (until sunrise at {sunrise_str})")
-        return max(minutes, default)  # Never sleep less than default
+        logger.info(f"ESP32 night sleep: {minutes}min (until sunrise at {sunrise_raw})")
+        return max(minutes, default)
+
+    def _is_golden_hour(self) -> bool:
+        """
+        True if we're within ±N minutes of the actual sunrise OR sunset (where
+        N defaults to 15, configurable via timing.golden_hour_window_minutes).
+
+        Inside this window the scorer adds a warm-sky bonus on top of the
+        base profile score, so the "goodnight image" served all night has a
+        chance to win against daytime candidates still in the pool.
+        """
+        sun_times = self._get_sun_times()
+        if not sun_times:
+            return False
+
+        window = int(self.config.timing.get("golden_hour_window_minutes", 15))
+
+        active_hours = self.config.timing.get("active_hours", {})
+        tz = pytz.timezone(active_hours.get("timezone", "UTC"))
+        now = datetime.now(tz)
+
+        for key in ("sunrise_raw", "sunset_raw"):
+            t_str = sun_times.get(key)
+            if not t_str:
+                continue
+            h, m = map(int, t_str.split(":"))
+            event = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if abs((now - event).total_seconds()) <= window * 60:
+                return True
+        return False
 
     def _is_active_time(self) -> bool:
         """Check if current time is within active hours (sunrise to sunset)."""
@@ -502,10 +551,22 @@ class BeachCamService:
             sunset_dt += timedelta(minutes=15)
             sunset_time = sunset_dt.strftime("%H:%M")
 
-            self._sun_cache = {"date": today, "sunrise": sunrise_time, "sunset": sunset_time}
+            # Keep raw values too — the active-hours boundary uses the padded
+            # times (±15 min), but the golden-hour window and the sunset+20
+            # ESP wake target need the unpadded times.
+            sunrise_raw = sunrise_iso.split('T')[1][:5]
+            sunset_raw = sunset_iso.split('T')[1][:5]
+
+            self._sun_cache = {
+                "date": today,
+                "sunrise": sunrise_time,
+                "sunset": sunset_time,
+                "sunrise_raw": sunrise_raw,
+                "sunset_raw": sunset_raw,
+            }
             logger.info(
-                f"Sun times: sunrise {sunrise_iso.split('T')[1][:5]} (active from {sunrise_time}), "
-                f"sunset {sunset_iso.split('T')[1][:5]} (active until {sunset_time})"
+                f"Sun times: sunrise {sunrise_raw} (active from {sunrise_time}), "
+                f"sunset {sunset_raw} (active until {sunset_time})"
             )
             return self._sun_cache
         except Exception as e:
