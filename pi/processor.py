@@ -78,11 +78,13 @@ _COLOR_IDX = {"black": 0, "white": 1, "blue": 2, "yellow": 3, "red": 4, "green":
 PROFILE_OVERRIDES = {
     "jaffa": {
         # Tel Aviv shoreline: too many teal/cyan sea pixels were quantizing
-        # to green. Lift blue lighter & more chromatic so it captures more
-        # sea/sky, and shift green to a more "pure" green (less cyan/blue
-        # component) so its territory in color space narrows.
-        "blue":  (45, 95, 175),    # was (40, 70, 150)
-        "green": (30, 135, 60),    # was (35, 140, 75)
+        # to green. Lift blue toward cyan to claim those pixels, and pull
+        # green away from blue (lower b, slightly less g) so its territory
+        # in color space shrinks further. Each tweak shifts the equidistant
+        # boundary between blue and green by tens of points in RGB space —
+        # small numeric changes have visible effects on the panel.
+        "blue":  (55, 115, 175),   # was (45, 95, 175) — more cyan-leaning
+        "green": (40, 130, 45),    # was (30, 135, 60) — less cyan, more pure-mid-green
     },
 }
 
