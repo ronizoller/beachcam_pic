@@ -242,10 +242,12 @@ class BeachCamService:
         # atomic, so the ESP's /image read either sees the full old file or
         # the full new file — never a half-written one mid-stream. Without
         # this, a fetch cycle that happens during the ESP's 30–60 s render
-        # can corrupt the rendered image in hard-to-diagnose ways.
+        # can corrupt the rendered image in hard-to-diagnose ways. Pass
+        # format=BMP explicitly because PIL infers format from the extension
+        # and `.tmp` isn't a known one.
         output_path = self.data_dir / "current.bmp"
         tmp_path = output_path.with_suffix(".bmp.tmp")
-        processed_img.save(tmp_path)
+        processed_img.save(tmp_path, format="BMP")
         import os
         os.replace(tmp_path, output_path)
         logger.info(f"Saved best candidate (score={best['score']:.3f}): {output_path}")
