@@ -64,11 +64,16 @@ class BeachCamService:
         self._debug = debug  # Skip time checks in debug mode
         self._sun_cache: Optional[dict] = None  # {"date": "2026-04-09", "sunrise": "06:03", "sunset": "19:20"}
 
-        # Candidate tracking — cleared when ESP32 pulls /image or max age reached
+        # Candidate tracking — cleared when ESP32 pulls /image or max age reached.
+        # During the sunrise/sunset golden-hour window, ESP pulls DO NOT clear
+        # candidates so the full window's worth of frames competes for the
+        # "goodnight image" slot. See _is_golden_hour and the clear logic in
+        # fetch_and_process.
         self._candidates: list = []  # [{"path": Path, "score": float, "camera": str}]
         self._candidates_since: datetime = datetime.now()
         self._max_candidates_age_hours = 3
         self.image_pulled = False  # Set by server when ESP32 pulls /image
+        self._was_golden_hour_last_cycle = False  # Detect window entry/exit
 
         # Guest beach — once per day at a random time
         self._guest_today: Optional[dict] = None  # {"date": str, "trigger_minutes": int, "camera": dict}
@@ -100,24 +105,56 @@ class BeachCamService:
             logger.info("Outside active hours, skipping fetch")
             return False
 
-        # Clear candidates if ESP32 pulled or max age reached
+        # ---- Candidate clearing decision ----
+        # Three reasons we might clear, in priority order:
+        #   (1) entering golden hour — drop daytime candidates so the sunset
+        #       window competes on its own (otherwise a great 14:00 frame
+        #       could beat a weaker sunset even with the warm-sky bonus).
+        #   (2) max age — backstop so a stale pool can't live forever.
+        #   (3) ESP pulled /image — normal "ESP saw it, start fresh".
+        # Crucially, (3) is SUPPRESSED during golden hour so the ESP's
+        # mid-window pull doesn't wipe the early-window candidates. The
+        # final goodnight image is then picked from the full window when
+        # the ESP wakes again at sunset+20.
+        in_golden = self._is_golden_hour()
+        entered_golden = in_golden and not self._was_golden_hour_last_cycle
+        self._was_golden_hour_last_cycle = in_golden
+
         age_hours = (datetime.now() - self._candidates_since).total_seconds() / 3600
-        if self.image_pulled or age_hours >= self._max_candidates_age_hours:
-            reason = "ESP32 pulled image" if self.image_pulled else f"max age ({self._max_candidates_age_hours}h)"
-            self._clear_candidates(reason)
+        max_age_reached = age_hours >= self._max_candidates_age_hours
+        clear_on_pull = self.image_pulled and not in_golden
 
-            if self.image_pulled:
-                if self._guest_active:
-                    # Guest was served — back to main
-                    self._guest_active = False
-                    self._guest_used_today = datetime.now().strftime("%Y-%m-%d")
-                    logger.info("Guest beach served to ESP32, back to main camera")
-                elif self._is_guest_cycle():
-                    # Trigger time has passed — start guest mode now
-                    self._guest_active = True
-                    logger.info(f"Guest beach starting: {self._guest_today['camera']['name']}")
+        clear_reason = None
+        if entered_golden:
+            clear_reason = "entering golden hour — fresh slate for sunset selection"
+        elif max_age_reached:
+            clear_reason = f"max age ({self._max_candidates_age_hours}h)"
+        elif clear_on_pull:
+            clear_reason = "ESP32 pulled image"
 
-            self.image_pulled = False
+        if clear_reason:
+            self._clear_candidates(clear_reason)
+
+        # Guest beach state transitions only happen on real (non-golden-hour)
+        # ESP pulls. Golden-hour pulls don't end a guest cycle — but guests
+        # are randomly scheduled mid-day, so overlap with sunset is unlikely.
+        if clear_on_pull:
+            if self._guest_active:
+                self._guest_active = False
+                self._guest_used_today = datetime.now().strftime("%Y-%m-%d")
+                logger.info("Guest beach served to ESP32, back to main camera")
+            elif self._is_guest_cycle():
+                self._guest_active = True
+                logger.info(f"Guest beach starting: {self._guest_today['camera']['name']}")
+
+        # Always reset the pull flag so it doesn't persist across cycles.
+        # During golden hour, we log the suppression so the behavior is visible.
+        if self.image_pulled and in_golden and not clear_reason:
+            logger.info(
+                "ESP pulled during golden hour — preserving candidate pool; "
+                "next ESP wake at sunset+20 will pick from the full window"
+            )
+        self.image_pulled = False
 
         self._cycle_count += 1
         is_guest = self._guest_active
