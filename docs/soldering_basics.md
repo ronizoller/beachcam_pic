@@ -28,7 +28,11 @@ Nice-to-have (not required):
 | Scrap dupont wires | Cut one end off existing wires; you have lots | 4-6 short pieces |
 | Small LEDs | If you have a beginner electronics kit, you probably have some. Otherwise grab a $3 pack of "5mm LED assorted colors" from Amazon. | 4-6 (you'll mess some up — that's the point) |
 | 220Ω resistor | Already in your project parts (used with the speaker) | 1-2 |
-| LiPo or 3V battery | Already have the LiPo | 1 |
+| Multimeter | Already have, used for MT3608 calibration | 1 |
+
+**Why not the LiPo for practice?** The project's LiPo only has a JST connector — no bare terminals you can clip wires to. Trying to power practice circuits from the JST is fiddly and risks shorting the battery. Instead, we use the **multimeter** to verify your solder joints work (continuity beep + diode test mode), and save the LiPo for the actual project assembly.
+
+If you happen to have a **coin cell (CR2032 = 3V)** or **two AA batteries in a holder (3V)**, those work as optional LED-lighting power. Not required.
 
 ---
 
@@ -78,40 +82,71 @@ Try it 3-4 times. The first one will be ugly. By the fourth, you'll have the fee
 
 ## Practice 3: Solder an LED + resistor circuit
 
-This builds confidence with components that can break if mishandled (LEDs are sensitive to heat and reverse polarity).
+This builds confidence with components that can break if mishandled (LEDs are sensitive to heat and reverse polarity). You'll verify each joint with the multimeter — no battery needed.
 
-### Circuit
+### Circuit you'll build
 ```
-LiPo (+) → wire → 220Ω resistor → LED long leg (+) → LED short leg (−) → wire → LiPo (−)
+wire ── 220Ω resistor ── LED long leg (+)  ──  LED short leg (−) ── wire
+  ^                                                                    ^
+  free wire end (will be probe point 1)        free wire end (probe point 2)
 ```
 
-The resistor limits current to safe levels (~12mA at 3.7V). **Never connect an LED directly to the battery without a resistor — it'll fry instantly.**
-
-### LED polarity (critical)
-- **Long leg** = anode (positive) — connects toward battery +
-- **Short leg** = cathode (negative) — connects toward battery −
+### LED polarity (critical for the test step)
+- **Long leg** = anode (positive)
+- **Short leg** = cathode (negative)
 - Also: the flat edge on the round plastic dome marks the negative side
 
-Reverse polarity won't light the LED (LEDs only conduct one way). It also won't damage them at battery voltages.
+LEDs only conduct one way. Reverse polarity won't damage them at low voltages, just won't light.
 
 ### Soldering steps
-1. Strip and tin both ends of two short wires (~5cm each)
-2. Solder one wire to one leg of the resistor — clip the LED leg / resistor leg short first if needed
-3. Solder the other resistor leg to the LED's long leg
-4. Solder the other wire to the LED's short leg
-5. Touch the loose wire ends to the LiPo terminals (long-leg side to +, short-leg side to −)
+1. Strip and tin both ends of two short wires (~5 cm each)
+2. Solder one wire to one leg of the resistor — clip the resistor leg short first if needed (5 mm of leg left is plenty)
+3. Solder the other resistor leg to the LED's **long leg**
+4. Solder the other wire to the LED's **short leg**
 
-LED should light up. If not:
-- Polarity reversed → swap the wires at the battery
-- Bad solder joint → wiggle each joint with a finger while connected, looking for flicker. A loose joint flickers; a good joint stays steady.
+You now have a finished tiny circuit with two free wire ends.
+
+### Test each joint with the multimeter — continuity mode
+
+Most multimeters have a "continuity" mode — usually a speaker/beeper icon on the dial, or it auto-detects very low resistance. When the probes touch two ends of a wire (or any conducting path), the meter **beeps** to confirm electricity can flow.
+
+If your auto-detect meter doesn't beep, look for a beeper icon and rotate to it.
+
+Test sequence:
+1. Touch one probe to the bare wire end on the resistor side
+2. Touch the other probe to the LED's long leg (the leg between the wire and the LED body, accessible just below the soldered joint)
+3. Should **beep** → resistor side wire-to-LED joint is good
+4. Now move the second probe to the LED's short leg solder joint area
+5. Should **NOT beep** → the LED is in between, and in continuity mode the small voltage isn't enough to forward-bias it. Good — it means there's no accidental short across the LED.
+6. Now move the first probe to the other wire's bare end (cathode side)
+7. Probe between the two wire ends — no beep (LED blocks DC at this low voltage)
+8. **Swap the probes** so red goes to the cathode-side wire — still no beep. Confirms no short across the LED.
+
+### Test the LED itself — diode test mode
+
+Most multimeters have a separate "diode" mode (often labeled with a diode triangle symbol, sometimes on the same dial position as continuity). Diode mode applies a slightly higher voltage (~2-3V) that's enough to forward-bias an LED.
+
+1. Switch the meter to **diode mode** (or press the SELECT/MODE button if your meter combines diode+continuity)
+2. 🔴 Red probe → the wire connected to the LED's long leg (anode side)
+3. ⚫ Black probe → the other wire (cathode side)
+4. **LED should light up faintly** while the probes touch
+5. Display shows the LED's forward voltage (typically `1.8` for red, `2.0` for yellow, `3.0` for blue/white)
+6. Swap the probes — LED stays dark, display shows `OL` or `1.` — that confirms it only conducts one way
+
+If the LED lights, every solder joint in the chain is working — congratulations.
+
+### If the LED doesn't light in diode mode
+- **Probes swapped** → red to anode side, black to cathode side. Try again.
+- **Cold solder joint somewhere** → wiggle each joint gently while probes are touching. If the LED flickers or comes alive, that joint is loose — reheat and re-solder it.
+- **Burned LED** → if you held the iron on its leg for >5 seconds, the LED may be dead. Grab another and try again.
 
 ### What if you damage the LED?
-LED sensitive to heat. If you dwell on a leg with the iron for >5 seconds, the LED can die. Symptoms:
-- Doesn't light even with correct polarity
+LEDs are sensitive to heat. If you dwell on a leg with the iron for >5 seconds, the LED can die. Symptoms:
+- Doesn't light even with correct polarity in diode mode
 - Lights very dim
-- One color when LED is white/RGB
+- Display shows weird forward voltage (e.g., `0.5` or `OL`)
 
-Just grab another LED and try again. They're cheap.
+Just grab another LED and try again. They're cheap. This is exactly why we practice on $0.03 components before $5 ICs.
 
 ---
 
