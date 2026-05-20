@@ -30,9 +30,7 @@ Nice-to-have (not required):
 | 220Ω resistor | Already in your project parts (used with the speaker) | 1-2 |
 | Multimeter | Already have, used for MT3608 calibration | 1 |
 
-**Why not the LiPo for practice?** The project's LiPo only has a JST connector — no bare terminals you can clip wires to. Trying to power practice circuits from the JST is fiddly and risks shorting the battery. Instead, we use the **multimeter** to verify your solder joints work (continuity beep + diode test mode), and save the LiPo for the actual project assembly.
-
-If you happen to have a **coin cell (CR2032 = 3V)** or **two AA batteries in a holder (3V)**, those work as optional LED-lighting power. Not required.
+**Why not the LiPo directly for practice?** The project's LiPo only has a JST connector — no bare terminals to clip wires to, and an exposed LiPo + accidental shorts is a recipe for trouble. **But** we have a clever workaround: the TP4056 module sits between the LiPo and the rest of the circuit, and it has solder pads (B+/B-) that output the LiPo's voltage but with built-in overcurrent and short-circuit protection. We'll solder onto those pads as our practice target. Bonus: the wires you solder during practice are the **same wires** the production circuit needs — practice IS the project work.
 
 ---
 
@@ -80,73 +78,87 @@ Try it 3-4 times. The first one will be ugly. By the fourth, you'll have the fee
 
 ---
 
-## Practice 3: Solder an LED + resistor circuit
+## Practice 3: Solder wires to the TP4056 + light an LED off it
 
-This builds confidence with components that can break if mishandled (LEDs are sensitive to heat and reverse polarity). You'll verify each joint with the multimeter — no battery needed.
+This is where practice meets the real project. The two wires you solder here are the **same wires** that will connect TP4056 → MT3608 in the final build — no wasted work.
 
-### Circuit you'll build
+### Why this is safer than it sounds
+
+- TP4056 B+/B- pads output ~3.7–4.2V (the LiPo's voltage, after protection)
+- The TP4056 has built-in **overcurrent + short-circuit protection** via its DW01 chip — if you accidentally bridge B+ to B- with a stray bit of solder, the protection cuts off and nothing burns
+- Pads are large through-holes — beginner-friendly to solder
+- ⚠️ **Always unplug the LiPo from the TP4056 while you have the iron in hand.** Reconnect only after the iron is back in its stand and cooled, and you've inspected the joint.
+
+### Tools and materials
+- Iron, solder, wick
+- 2× wires (~10 cm each) — these will become the TP4056 → MT3608 wires
+- Wire strippers (or a careful knife/fingernail)
+- LED (any color)
+- 220Ω resistor
+- The TP4056 module (LiPo **UNPLUGGED**)
+
+### Step-by-step
+
+#### A. Prep the wires
+1. Strip ~5 mm of insulation off both ends of each wire (4 strips total)
+2. Twist each stripped end tight so the strands stay together
+3. Tin all four wire ends — touch the iron to the bare strands, apply solder until the strands fuse into a single stiff metal tip. They should look silver and smooth, not blobby.
+
+#### B. Pre-tin the TP4056 pads
+LiPo **UNPLUGGED**. With the TP4056 on a flat surface:
+1. Hold the iron tip against the **B+ pad's metal rim** for ~2 seconds to heat it
+2. Touch solder to the heated pad (not the iron) — a small dome of solder should adhere to the pad and fill the through-hole partially
+3. Remove solder, then remove iron
+4. Repeat for the **B- pad**
+
+The pads now have a small mound of solder sitting on them. This makes attaching the wires much easier.
+
+#### C. Attach the wires
+1. Push the tinned end of wire #1 through the **B+ through-hole** from the bottom of the board so a few mm sticks up through the top
+2. Hold the iron against the wire+pad on the top — the existing solder on both should re-melt and merge
+3. Touch a tiny bit of extra solder if needed for a clean joint
+4. Remove iron, hold wire still until it cools (~5 sec)
+5. Repeat for wire #2 on **B- pad**
+
+#### D. Inspect
+The joints should look like smooth, shiny volcanos with the wire visible going into the apex.
+- **Dull / grainy** = moved during cooling — reheat, let cool undisturbed
+- **No solder bridging B+ and B-** = check carefully, including the bottom of the board. Use solder wick to remove any bridge.
+- **Wire wiggles loose** = cold joint — reheat both sides simultaneously, add a touch of solder
+
+### E. Light an LED off the soldered pads
+
+Now the LiPo is reconnected. The free ends of your two soldered wires output ~4V.
+
+Build a quick test circuit (no soldering — just twist the wires together for now):
 ```
-wire ── 220Ω resistor ── LED long leg (+)  ──  LED short leg (−) ── wire
-  ^                                                                    ^
-  free wire end (will be probe point 1)        free wire end (probe point 2)
+TP4056 B+ wire ── 220Ω resistor ── LED long leg (+)  ──  LED short leg (−) ── TP4056 B- wire
 ```
 
-### LED polarity (critical for the test step)
-- **Long leg** = anode (positive)
-- **Short leg** = cathode (negative)
-- Also: the flat edge on the round plastic dome marks the negative side
+LED polarity:
+- **Long leg** = anode → toward the **B+** wire (positive)
+- **Short leg** = cathode → toward the **B- ** wire (negative)
+- The flat edge on the LED's plastic dome also marks the negative side
 
-LEDs only conduct one way. Reverse polarity won't damage them at low voltages, just won't light.
+The resistor limits current to ~10 mA — safe for any LED.
 
-### Soldering steps
-1. Strip and tin both ends of two short wires (~5 cm each)
-2. Solder one wire to one leg of the resistor — clip the resistor leg short first if needed (5 mm of leg left is plenty)
-3. Solder the other resistor leg to the LED's **long leg**
-4. Solder the other wire to the LED's **short leg**
+Plug the LiPo into the TP4056's JST socket. **The LED should light up.**
 
-You now have a finished tiny circuit with two free wire ends.
+### F. Troubleshoot
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| LED doesn't light | LED polarity reversed | Swap the LED end-for-end in the chain |
+| LED doesn't light | TP4056's B+ wire is on its B- pad, vice versa (LiPo's JST polarity may be reversed) | Probe between the wire ends with the multimeter — you should see ~3.7–4.2V *positive* with red on the B+ wire. Negative means JST polarity reversed; see hardware_diagram.md for the LiPo JST fix. |
+| LED doesn't light | Cold solder joint at TP4056 | Wiggle each soldered wire gently; if the LED flickers when wiggled, reheat that joint and add a touch more solder |
+| LED very dim | Voltage low — LiPo nearly dead | Charge the LiPo via USB on the TP4056 |
+| TP4056 LED off, no power anywhere | Solder bridge between B+ and B- triggered protection cutoff | Unplug LiPo. Inspect both pads carefully (including the bottom). Use solder wick to remove any bridge. Re-test. |
 
-### Test each joint with the multimeter — continuity mode
+### G. Once the LED works
+- Unplug the LiPo
+- Disconnect the LED + resistor (they were just a test load)
+- Your soldered B+ and B- wires now go to **MT3608 IN+** and **IN-** respectively — see `hardware_diagram.md`. Refer to Practice 5 below for soldering the MT3608 side.
 
-Most multimeters have a "continuity" mode — usually a speaker/beeper icon on the dial, or it auto-detects very low resistance. When the probes touch two ends of a wire (or any conducting path), the meter **beeps** to confirm electricity can flow.
-
-If your auto-detect meter doesn't beep, look for a beeper icon and rotate to it.
-
-Test sequence:
-1. Touch one probe to the bare wire end on the resistor side
-2. Touch the other probe to the LED's long leg (the leg between the wire and the LED body, accessible just below the soldered joint)
-3. Should **beep** → resistor side wire-to-LED joint is good
-4. Now move the second probe to the LED's short leg solder joint area
-5. Should **NOT beep** → the LED is in between, and in continuity mode the small voltage isn't enough to forward-bias it. Good — it means there's no accidental short across the LED.
-6. Now move the first probe to the other wire's bare end (cathode side)
-7. Probe between the two wire ends — no beep (LED blocks DC at this low voltage)
-8. **Swap the probes** so red goes to the cathode-side wire — still no beep. Confirms no short across the LED.
-
-### Test the LED itself — diode test mode
-
-Most multimeters have a separate "diode" mode (often labeled with a diode triangle symbol, sometimes on the same dial position as continuity). Diode mode applies a slightly higher voltage (~2-3V) that's enough to forward-bias an LED.
-
-1. Switch the meter to **diode mode** (or press the SELECT/MODE button if your meter combines diode+continuity)
-2. 🔴 Red probe → the wire connected to the LED's long leg (anode side)
-3. ⚫ Black probe → the other wire (cathode side)
-4. **LED should light up faintly** while the probes touch
-5. Display shows the LED's forward voltage (typically `1.8` for red, `2.0` for yellow, `3.0` for blue/white)
-6. Swap the probes — LED stays dark, display shows `OL` or `1.` — that confirms it only conducts one way
-
-If the LED lights, every solder joint in the chain is working — congratulations.
-
-### If the LED doesn't light in diode mode
-- **Probes swapped** → red to anode side, black to cathode side. Try again.
-- **Cold solder joint somewhere** → wiggle each joint gently while probes are touching. If the LED flickers or comes alive, that joint is loose — reheat and re-solder it.
-- **Burned LED** → if you held the iron on its leg for >5 seconds, the LED may be dead. Grab another and try again.
-
-### What if you damage the LED?
-LEDs are sensitive to heat. If you dwell on a leg with the iron for >5 seconds, the LED can die. Symptoms:
-- Doesn't light even with correct polarity in diode mode
-- Lights very dim
-- Display shows weird forward voltage (e.g., `0.5` or `OL`)
-
-Just grab another LED and try again. They're cheap. This is exactly why we practice on $0.03 components before $5 ICs.
+That's it — you've done your first real project soldering, and verified it works.
 
 ---
 
@@ -170,32 +182,40 @@ Practice on your Practice 2 wires until you can solder + desolder + re-solder wi
 
 ---
 
-## Now the actual project: TP4056 and MT3608
+## Practice 5: MT3608 connections (finishing the project)
 
-You've practiced. Now the real targets.
+TP4056 side is done from Practice 3. Now the MT3608 — three pads: **IN+** and **IN-** (from TP4056), plus **OUT+** (to ESP32 5V). OUT- already grounded.
 
-### Tinning the pads (recommended first step)
+### Setup
+- LiPo **UNPLUGGED** from the TP4056
+- Iron, solder, wick at hand
+- The two wires from Practice 3 already soldered to TP4056 B+ (red) and B- (black) — their free ends ready to go into the MT3608
+- One extra wire (~10 cm, both ends stripped and tinned) for MT3608 OUT+ → ESP32 5V (still floating until calibration)
 
-For each pad on the TP4056 you'll connect to (B+ and B-):
-1. Hold the iron tip against the pad's metal rim for 2 sec
-2. Touch solder to the heated pad — a small dome of solder should adhere to the pad
-3. Remove solder + iron
+### Solder wires to MT3608 IN+/IN-
 
-This "pre-tins" the pad. Same for the MT3608 pads (IN+, IN-, OUT+, OUT-).
+1. **Pre-tin** the MT3608 IN+ and IN- pads (same technique as Practice 3 step B)
+2. Push the **TP4056-B+ wire** through the MT3608 IN+ through-hole from the bottom
+3. Heat + reflow + remove iron (same as Practice 3 step C)
+4. Repeat with **TP4056-B- wire** through MT3608 IN-
 
-### Attaching a wire
+### Solder the OUT+ wire (but leave its other end floating)
 
-1. Strip ~5mm of insulation, twist the strands tight, and **tin the wire end** (heat + add solder so the strands are fused into a stiff little soldered tip)
-2. Hold the tinned wire end against the pre-tinned pad
-3. Touch the iron to the wire + pad — the existing solder on both should re-melt and merge into one joint
-4. Remove iron, hold the wire still until it cools (~5 sec)
+1. Pre-tin the MT3608 **OUT+** pad
+2. Push the extra wire through the OUT+ hole, solder
+3. **Leave the other end floating, isolated** — do NOT connect it to ESP32 5V yet
+4. Tape the floating end so it can't accidentally touch ESP32 pins
 
-For through-holes (the pads we discussed): push the tinned wire through the hole from the **bottom** of the board, so the wire sticks up through the hole. Then solder from the top. This makes a stronger joint and is the standard way for through-hole work.
+### Inspect everything before plugging in the LiPo
 
-### How much solder?
-- Not too little — the joint should fully cover the wire + fill the hole (for through-holes)
-- Not too much — a giant blob is weaker than a properly-shaped joint and may bridge to adjacent pads
-- Target shape: a smooth volcano, with the wire visible going into the apex
+Critical visual checks:
+- No solder bridges between adjacent pads (B+/B-, IN+/IN-, OUT+/OUT-)
+- All joints shiny + cone-shaped, not dull or blobby
+- The OUT+ floating end is clearly away from any ESP pin
+
+### Now you're ready for MT3608 calibration
+
+See `hardware_diagram.md` → "Setting the MT3608 Trimpot" for the 5.0V calibration steps. You finally have reliable connections, so the multimeter will read a clean voltage and the trimpot will respond.
 
 ---
 
