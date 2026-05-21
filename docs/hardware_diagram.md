@@ -132,6 +132,26 @@ The LiPo's 3.0–4.2V output is too low to feed the ESP32's `5V` pin directly �
 
 ## Power System Wiring
 
+### ⚠️ Critical: Verify TP4056 polarity with a multimeter before wiring MT3608
+
+Cheap TP4056 USB-C modules sometimes have **reversed silkscreen labels** — the pad labeled "B+" may actually output the LiPo's *negative*, and vice versa. Likewise, some LiPo manufacturers wire their JST plugs with non-standard polarity (red wire on what should be the negative pin). Either defect alone — or both combined — flips the polarity downstream invisibly.
+
+Connecting an MT3608 to reverse-polarity input causes a **brief short circuit through the internal body diode → spark at VIN → permanently damaged FET**. The module appears fine in resistance checks but trips the TP4056 protection under any load. There is no "soft fail" — it's silent destruction.
+
+**Always verify before wiring the MT3608:**
+
+1. Plug the LiPo into the TP4056's JST socket
+2. Multimeter in DC voltage mode (any range above 5V — auto-detect is fine)
+3. 🔴 Red probe → TP4056 **labeled "B+"** pad
+4. ⚫ Black probe → TP4056 **labeled "B-"** pad
+5. Read the **sign** on the display:
+   - **Positive (+3.7-4.2V)** → labels are correct; wire normally
+   - **Negative (−3.7-4.2V)** → silkscreen is reversed; treat labeled "B+" as your negative and "B-" as your positive (or swap LiPo JST wires for clean labeling)
+
+After this verification, tag the actual positive wire (the one giving a positive reading with red probe) with red tape or a marker. Connect that wire to MT3608 **IN+** regardless of its insulation color or the TP4056 label. Same for the negative side.
+
+**Cost of skipping this step:** 1 dead MT3608 ($1) and a few hours of debugging.
+
 ### Step 1: Battery to Charger
 
 **No wiring needed** - the battery plugs directly into the TP4056.
