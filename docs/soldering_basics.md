@@ -12,9 +12,9 @@ Three items (~$25 total on Amazon):
 |------|-------|-----|
 | **Soldering iron** | 40-60W, adjustable temperature, with a fine tip (~1mm) | Lower wattage = slower heat-up, harder to use on bigger pads. 60W with a fine tip handles everything in this project. |
 | **Lead-free solder** | 0.6-0.8 mm diameter, rosin-core, lead-free (SAC305) | Thinner is easier for fine work. Rosin-core has flux inside — you don't need separate flux. Lead-free is safer for hobby use. |
-| **Solder wick** (a.k.a. desoldering braid) | Copper braid on a small spool | For undoing mistakes. ~$3, lasts forever. |
 
 Nice-to-have (not required):
+- **Solder wick** (a.k.a. desoldering braid) — copper braid that lifts solder off pads, $3. Makes desoldering mistakes much easier. We'll cover wick-free desoldering techniques below for now, but if you can grab a roll alongside the iron, do it — you'll thank yourself the first time you make a solder bridge.
 - **Helping hands** (alligator clip stand) — holds wires while you solder. Otherwise tape works.
 - **Damp sponge or brass tip cleaner** — for cleaning the iron tip during use.
 - **Safety glasses** — solder splatter is rare but happens.
@@ -90,7 +90,7 @@ This is where practice meets the real project. The two wires you solder here are
 - ⚠️ **Always unplug the LiPo from the TP4056 while you have the iron in hand.** Reconnect only after the iron is back in its stand and cooled, and you've inspected the joint.
 
 ### Tools and materials
-- Iron, solder, wick
+- Iron, solder
 - 2× wires (~10 cm each) — these will become the TP4056 → MT3608 wires
 - Wire strippers (or a careful knife/fingernail)
 - LED (any color)
@@ -123,7 +123,7 @@ The pads now have a small mound of solder sitting on them. This makes attaching 
 #### D. Inspect
 The joints should look like smooth, shiny volcanos with the wire visible going into the apex.
 - **Dull / grainy** = moved during cooling — reheat, let cool undisturbed
-- **No solder bridging B+ and B-** = check carefully, including the bottom of the board. Use solder wick to remove any bridge.
+- **No solder bridging B+ and B-** = check carefully, including the bottom of the board. If you find a bridge, use the drag technique from Practice 4 (Technique C) to clear it.
 - **Wire wiggles loose** = cold joint — reheat both sides simultaneously, add a touch of solder
 
 ### E. Light an LED off the soldered pads
@@ -151,7 +151,7 @@ Plug the LiPo into the TP4056's JST socket. **The LED should light up.**
 | LED doesn't light | TP4056's B+ wire is on its B- pad, vice versa (LiPo's JST polarity may be reversed) | Probe between the wire ends with the multimeter — you should see ~3.7–4.2V *positive* with red on the B+ wire. Negative means JST polarity reversed; see hardware_diagram.md for the LiPo JST fix. |
 | LED doesn't light | Cold solder joint at TP4056 | Wiggle each soldered wire gently; if the LED flickers when wiggled, reheat that joint and add a touch more solder |
 | LED very dim | Voltage low — LiPo nearly dead | Charge the LiPo via USB on the TP4056 |
-| TP4056 LED off, no power anywhere | Solder bridge between B+ and B- triggered protection cutoff | Unplug LiPo. Inspect both pads carefully (including the bottom). Use solder wick to remove any bridge. Re-test. |
+| TP4056 LED off, no power anywhere | Solder bridge between B+ and B- triggered protection cutoff | Unplug LiPo. Inspect both pads carefully (including the bottom). Use Practice 4 Technique C (drag with clean iron tip) to remove the bridge. Re-test. |
 
 ### G. Once the LED works
 - Unplug the LiPo
@@ -162,23 +162,61 @@ That's it — you've done your first real project soldering, and verified it wor
 
 ---
 
-## Practice 4: Desoldering (undoing mistakes)
+## Practice 4: Desoldering without wick
 
-You **will** make mistakes. Solder a joint, then practice un-soldering it.
+You **will** make mistakes. Without solder wick, you have three techniques — all use just the iron and gravity. They cover ~95% of the cases you'll hit on this project.
 
-### Method A: Solder wick (the easy way)
-1. Lay the wick across the joint
-2. Press the iron tip on top of the wick, against the joint
-3. Wait 2-3 seconds — solder melts and gets absorbed into the wick (capillary action again)
-4. Lift the iron + wick together
-5. Cut off the saturated part of the wick — you can't re-use it
+### Technique A: Reheat + pull (for through-hole joints)
 
-### Method B: Reheat + pull
-1. Heat the joint until solder is liquid (you'll see it shimmer)
-2. Pull the wire/leg out while still molten
-3. Wipe excess solder on a damp sponge
+Use this when a wire is in a hole and you want to remove it cleanly.
 
-Practice on your Practice 2 wires until you can solder + desolder + re-solder without damaging the wires.
+1. Hold the wire near the joint with your other hand (or pliers/tweezers — wire gets hot fast)
+2. Touch the iron to the joint until the solder turns shiny + liquid (~2-3 sec)
+3. While solder is molten, pull the wire **straight out** of the hole — don't twist
+4. Most of the solder comes out with the wire; a small ring stays on the pad — fine for re-soldering later
+5. Wipe excess solder off the iron tip on a damp sponge or scrap of cardboard
+
+### Technique B: Reheat + tap (for solder still in the hole)
+
+If the hole stays partially blocked with solder after pulling the wire:
+
+1. Hold the board with one hand, iron in the other
+2. Heat the pad until the solder in the hole melts
+3. With the molten solder still liquid, give the board a quick **firm tap** against a hard surface (table edge, with a paper towel underneath to catch flying solder)
+4. The molten solder droplets out of the hole
+5. Repeat if needed
+
+You may have to do this 2-3 times for a fully clean hole. Wear safety glasses if you have them — tiny solder bits do go flying.
+
+### Technique C: Drag for solder bridges (most common project mistake)
+
+If two adjacent pads got bridged by extra solder:
+
+1. Wipe the iron tip clean on the damp sponge (or scrap cardboard if no sponge — drag it sideways, leaving the solder behind on the sponge)
+2. With a **clean** tip, touch the iron to the bridge and slowly drag sideways across both pads
+3. The bridge solder transfers from the pads to the tip
+4. Wipe the tip clean again, repeat if any bridge remains
+
+This works because clean copper attracts molten solder more than the pads do (when both are hot). Each drag pulls a little more solder onto the tip.
+
+### Technique D: Add fresh solder + drag (paradoxical fix for stubborn bridges)
+
+Sometimes a bridge has gone slightly oxidized and won't lift with technique C. Counter-intuitively:
+
+1. Add a small dab of **fresh** solder onto the bridge — the rosin flux in fresh solder re-wets everything
+2. Now drag the clean iron tip across — the combined molten pool lifts off easily
+
+Add → wipe iron → drag → wipe iron. Usually one cycle clears it.
+
+### Practice exercise
+
+On your Practice 2 wires:
+1. Solder two scrap dupont wires together (good joint)
+2. **Un-solder them** using Technique A (heat + pull)
+3. Re-strip if needed and **re-solder** them
+4. Do this 3-4 times until you can solder + desolder confidently
+
+Pro tip: clean the iron tip every minute or so. A blackened/oxidized tip won't transfer heat well — solder will sit on the tip in beads instead of flowing. Wipe on damp sponge or scrape on cardboard.
 
 ---
 
@@ -188,7 +226,7 @@ TP4056 side is done from Practice 3. Now the MT3608 — three pads: **IN+** and 
 
 ### Setup
 - LiPo **UNPLUGGED** from the TP4056
-- Iron, solder, wick at hand
+- Iron, solder at hand
 - The two wires from Practice 3 already soldered to TP4056 B+ (red) and B- (black) — their free ends ready to go into the MT3608
 - One extra wire (~10 cm, both ends stripped and tinned) for MT3608 OUT+ → ESP32 5V (still floating until calibration)
 
@@ -239,9 +277,9 @@ See `hardware_diagram.md` → "Setting the MT3608 Trimpot" for the 5.0V calibrat
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| Solder ball just sits on the pad, doesn't bond | Pad wasn't hot enough — you applied solder to the iron, not the joint | Wipe the bad solder off with wick, retry — heat the joint first, then apply solder to the joint |
+| Solder ball just sits on the pad, doesn't bond | Pad wasn't hot enough — you applied solder to the iron, not the joint | Remove the bad solder using Practice 4 Technique A (heat + pull) or C (drag with clean tip), retry: heat the joint first, then apply solder to the joint |
 | Joint looks dull/grainy/rough | Moved during cooling, or not enough heat | Reheat the joint, let it cool undisturbed |
-| Solder bridge between two adjacent pads | Too much solder + pads too close | Drag the iron across the bridge with the tip wiped clean, or use wick to remove the extra |
+| Solder bridge between two adjacent pads | Too much solder + pads too close | Drag the iron across the bridge with the tip wiped clean (Practice 4 Technique C) |
 | Wire pulls out easily | Cold joint — solder bonded to wire but not pad (or vice versa) | Reheat both sides simultaneously, apply a tiny bit more solder |
 | Iron tip won't pick up solder anymore | Tip oxidized | Clean with brass wool, re-tin with fresh solder. Always tin before storing. |
 | Brown smoke / smell | Burning the PCB or insulation | Move iron away immediately. Brief contact is fine; sustained contact damages. |
@@ -263,7 +301,7 @@ See `hardware_diagram.md` → "Setting the MT3608 Trimpot" for the 5.0V calibrat
 Once you can:
 - ✅ Solder two wires together cleanly (Practice 2)
 - ✅ Light an LED with a soldered resistor circuit (Practice 3)
-- ✅ Undo a joint with wick (Practice 4)
+- ✅ Undo a joint without wick (Practice 4 — heat + pull, or drag-clean for bridges)
 
 …you're ready to solder the TP4056 + MT3608 connections for the surf frame. Refer to `hardware_diagram.md` for which pads connect to what.
 
