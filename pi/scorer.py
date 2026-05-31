@@ -126,31 +126,55 @@ def _score_composition(arr: np.ndarray, cfg: dict, profile: str) -> float:
 
 def _golden_hour_bonus(arr: np.ndarray) -> float:
     """
-    Detect warm-colored sky in the upper half of the frame.
+    Detect warm-colored sky in the upper portion of the frame.
 
-    Sunset/sunrise skies are dominated by warm hues — orange/red/pink/gold —
-    in the top portion of the image. This counts how much of the sky region
-    looks like a real golden-hour sky vs. ordinary daytime blue or gray.
+    Tel Aviv evenings produce a wide range of golden-hour appearances, and
+    pixel-level signals are weaker than they look to the eye:
+      - Vivid sunset: R clearly dominates B (R-B > 40), R > 100.
+      - Pastel dusk: R only slightly above B (R-B > 5), the bulk of soft
+        pinkish-lavender evenings. The mean R-B can still be near zero
+        because cool areas drag the average down.
+      - Tail warmth: even pastel skies have a small fraction of strongly
+        warm pixels near the horizon; the 95th-percentile R-B value
+        captures that tail as a tie-breaker between "uniformly muted"
+        and "muted overall but with visible warm glow."
+
+    Combining the three lets a strong vivid sunset clearly outscore a
+    pastel evening, and a pastel-with-glow outscore a uniform muted dusk.
 
     Returns:
-        Bonus between 0.0 (no warm sky) and 1.0 (sky completely warm-colored).
+        Bonus between 0.0 (no warm sky) and 1.0 (sky strongly warm).
     """
     h = arr.shape[0]
-    sky = arr[:int(h * 0.50), :, :]  # upper half = where sky lives
+    # 60% covers the horizon line where the warm band often sits — at 50%
+    # the cutoff sometimes slices through the brightest part of the glow.
+    sky = arr[:int(h * 0.60), :, :]
     r, g, b = sky[:, :, 0], sky[:, :, 1], sky[:, :, 2]
 
-    # Warm: R clearly dominates B, with G in between (sunset gradient).
-    # Brightness floor (r > 100) avoids counting dark dim regions.
-    is_warm = (r > b + 40) & (r > g + 5) & (r > 100)
-    warm_pct = float(np.sum(is_warm)) / r.size
+    is_vivid = (r > b + 40) & (r > g + 5) & (r > 100)
+    is_pastel = (r > b + 5) & (r > 100) & ~is_vivid
 
-    # Map warm fraction to bonus. Below 10% = no real golden-hour scene
-    # (ignore stray warm reflections). 10–60% = ramp up. Above 60% = 1.0.
-    if warm_pct < 0.10:
+    vivid_pct = float(np.sum(is_vivid)) / r.size
+    pastel_pct = float(np.sum(is_pastel)) / r.size
+
+    # Tail: how warm are the warmest pixels? Distinguishes "uniformly
+    # muted pink" (low tail) from "pink with a glowing horizon" (high tail).
+    # p95 R-B for a clear blue sky is ~-15, overcast ~-4, pastel dusk ~5-20,
+    # vivid sunset ~30-60. Map 0→0, 30→1.
+    rb = r - b
+    p95_warm = float(np.percentile(rb, 95))
+    tail_score = max(0.0, min(1.0, p95_warm / 30.0))
+
+    # Vivid weighted highest (a real sunset should clearly win), pastel
+    # is the main pastel-dusk signal, tail breaks ties between similar
+    # pastel coverage levels.
+    warm_score = vivid_pct * 1.0 + pastel_pct * 0.5 + tail_score * 0.2
+
+    if warm_score < 0.05:
         return 0.0
-    if warm_pct >= 0.60:
+    if warm_score >= 0.5:
         return 1.0
-    return (warm_pct - 0.10) / 0.50
+    return (warm_score - 0.05) / 0.45
 
 
 # --- Zone-based detection functions (Jaffa profile) ---
