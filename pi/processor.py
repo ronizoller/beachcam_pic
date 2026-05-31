@@ -94,6 +94,14 @@ PROFILE_OVERRIDES = {
                                    # less dim on the panel
         "green": (40, 130, 45),    # less cyan, more pure-mid-green
     },
+    "beach": {
+        # Guest beaches (Baleal, Dahab, etc.) are sea-dominated scenes. The
+        # default blue (0,0,255) has luminance ~29 — anywhere a sea/sky pixel
+        # quantizes to it, the panel renders very dim. Use the same brighter
+        # cyan-leaning blue as the Jaffa profile (~137 luminance) so the
+        # dominant sea/sky region renders much lighter on the panel.
+        "blue": (75, 140, 195),
+    },
 }
 
 
