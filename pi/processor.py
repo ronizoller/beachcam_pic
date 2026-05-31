@@ -82,25 +82,20 @@ _COLOR_IDX = {"black": 0, "white": 1, "blue": 2, "yellow": 3, "red": 4, "green":
 # distribution (more sky/sea pixels into blue, less into green, etc.).
 PROFILE_OVERRIDES = {
     "jaffa": {
-        # Tel Aviv shoreline: too many teal/cyan sea pixels were quantizing
-        # to green. Lift blue toward cyan to claim those pixels, and pull
-        # green away from blue (lower b, slightly less g) so its territory
-        # in color space shrinks further. Each tweak shifts the equidistant
-        # boundary between blue and green by tens of points in RGB space —
-        # small numeric changes have visible effects on the panel.
-        "blue":  (75, 140, 195),   # brighter + more cyan-leaning; pulls more
-                                   # teal sea pixels in, and the blue itself
-                                   # has higher luminance (~137) so renders
-                                   # less dim on the panel
-        "green": (40, 130, 45),    # less cyan, more pure-mid-green
+        # Lighter palette targets shift the quantization boundary so more
+        # sea/sky pixels prefer white over blue — the single biggest lever
+        # for apparent brightness, since white is the only high-luminance
+        # entry in the 6-color palette (chromatic inks all render mid-tone).
+        "blue":  (130, 185, 220),  # very light cyan-leaning; sea/sky pixels
+                                   # have to be quite saturated-blue to snap
+                                   # here, so most go to white instead
+        "green": (60, 150, 70),    # slightly brighter mid-green
     },
     "beach": {
-        # Guest beaches (Baleal, Dahab, etc.) are sea-dominated scenes. The
-        # default blue (0,0,255) has luminance ~29 — anywhere a sea/sky pixel
-        # quantizes to it, the panel renders very dim. Use the same brighter
-        # cyan-leaning blue as the Jaffa profile (~137 luminance) so the
-        # dominant sea/sky region renders much lighter on the panel.
-        "blue": (75, 140, 195),
+        # Same idea for guest beaches (Baleal, Dahab, etc.) — sea-dominated
+        # scenes. Lighter blue target → fewer pixels claim blue → more go to
+        # white → much brighter overall image.
+        "blue": (130, 185, 220),
     },
 }
 
