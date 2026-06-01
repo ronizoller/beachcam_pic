@@ -140,6 +140,7 @@ class Processor:
         saturation = float(display.get("saturation", 1.0))
         contrast = float(display.get("contrast", 1.0))
         brightness = float(display.get("brightness", 1.0))
+        gamma = float(display.get("gamma", 1.0))
 
         # If the panel is mounted rotated 90° (CW or CCW), render against a
         # landscape canvas so the overlay text and aspect ratio look right
@@ -164,6 +165,17 @@ class Processor:
         if contrast != 1.0:
             img = ImageEnhance.Contrast(img).enhance(contrast)
             logger.debug(f"Contrast x{contrast}")
+        # Gamma BEFORE the linear brightness multiplier. A linear multiplier
+        # clips bright pixels to white (e.g. mid-morning sand at input ~220
+        # becomes 255 under a 1.4x lift, losing all texture). Gamma lifts
+        # midtones strongly while compressing highlights, so the same sand
+        # ends up ~232 — brighter than the source but still rendering with
+        # detail when quantized to the 6-color palette.
+        if gamma != 1.0:
+            inv_g = 1.0 / gamma
+            lut = [int(round(255 * (i / 255.0) ** inv_g)) for i in range(256)]
+            img = img.point(lut * 3)
+            logger.debug(f"Gamma {gamma}")
         if brightness != 1.0:
             img = ImageEnhance.Brightness(img).enhance(brightness)
             logger.debug(f"Brightness x{brightness}")
