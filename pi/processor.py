@@ -82,20 +82,18 @@ _COLOR_IDX = {"black": 0, "white": 1, "blue": 2, "yellow": 3, "red": 4, "green":
 # distribution (more sky/sea pixels into blue, less into green, etc.).
 PROFILE_OVERRIDES = {
     "jaffa": {
-        # Lighter palette targets shift the quantization boundary so more
-        # sea/sky pixels prefer white over blue — the single biggest lever
-        # for apparent brightness, since white is the only high-luminance
-        # entry in the 6-color palette (chromatic inks all render mid-tone).
-        "blue":  (130, 185, 220),  # very light cyan-leaning; sea/sky pixels
-                                   # have to be quite saturated-blue to snap
-                                   # here, so most go to white instead
-        "green": (60, 150, 70),    # slightly brighter mid-green
+        # Cyan-leaning mid-blue: bright enough that sea/sky don't render
+        # as a dim navy stripe, but saturated enough that those pixels
+        # actually claim blue during quantization instead of collapsing
+        # to white. (Previous very-light value of 130,185,220 pulled too
+        # many pixels into white, washing out natural sea/sky colors.)
+        "blue":  (75, 140, 195),
+        "green": (40, 130, 45),
     },
     "beach": {
-        # Same idea for guest beaches (Baleal, Dahab, etc.) — sea-dominated
-        # scenes. Lighter blue target → fewer pixels claim blue → more go to
-        # white → much brighter overall image.
-        "blue": (130, 185, 220),
+        # Same rationale for guest beach scenes — sea/sky should read as
+        # blue ink, not white.
+        "blue": (75, 140, 195),
     },
 }
 

@@ -60,7 +60,7 @@ display:
   # uses more of its gamut. Contrast boost helps separate sky/sea/sand into
   # distinct quantized regions instead of a mid-tone mush. 1.0 = no change.
   # Tune in increments of 0.1; values above 1.7 typically over-saturate.
-  saturation: 0.8
+  saturation: 1.2
   contrast: 1.0
   # Gamma curve applied before the linear brightness multiplier. >1.0 lifts
   # midtones (sea, vegetation, shadows on sand) while preserving highlights
@@ -68,7 +68,7 @@ display:
   # brighter without losing detail" knob — much safer than the linear
   # brightness multiplier, which always clips highlights first.
   # 1.0 = no change, 1.4 = moderate lift, 1.7 = strong lift, 2.0+ = washed.
-  gamma: 1.5
+  gamma: 1.3
   # Final linear brightness multiplier after gamma. Use sparingly — gamma
   # is the preferred lever. 1.0 = no additional lift.
   brightness: 1.0
