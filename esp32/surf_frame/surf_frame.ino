@@ -12,10 +12,11 @@
  * (DEV_Config.{h,cpp}, EPD_13in3e.{h,cpp}, Debug.h). No Library Manager
  * package needed — the IDE compiles those files as part of the sketch.
  *
- * Wiring (matches DEV_Config.h):
- *   ESP32 GPIO13 → CLK    GPIO14 → DIN/MOSI    GPIO15 → CS_M    GPIO2  → CS_S
- *   ESP32 GPIO27 → DC     GPIO26 → RST         GPIO25 → BUSY    GPIO33 → PWR
- *   ESP32 3V3    → VCC    GND     → GND
+ * Wiring — FireBeetle 2 ESP32-E (DFR0654), silkscreen label → panel signal:
+ *   SCK  → CLK    MOSI → DIN/MOSI    D11 → CS_M    D10 → CS_S
+ *   D3   → RST    D2   → DC          A2  → BUSY    D7  → PWR
+ *   3V3  → VCC    GND  → GND
+ *   (GPIOs: SCK=18 MOSI=23 D11=16 D10=17 D3=26 D2=25 A2=34 D7=13 — see DEV_Config.h)
  *
  * Image format expected from the Pi:
  *   24-bpp BMP, 1200 wide × 1600 tall (panel-native portrait).
@@ -492,9 +493,9 @@ void postClearDone() {
 }
 
 // Pi-triggered maintenance: black/white cycles to flush particles, end on
-// white (recommended storage state per Waveshare). Same WiFi-off + LDO
-// cooldown discipline as the image refresh path, since each Clear() does its
-// own DRF current spike.
+// white (recommended storage state per Waveshare). Still shuts WiFi off before
+// the DRF current spikes; the LDO-cooldown wait was dropped (FireBeetle's
+// regulator handles the DRF spike without it — re-add if brownouts reappear).
 void runClearCycle() {
     logln("CLEAR: requested by Pi — running maintenance cycle.");
 
@@ -502,11 +503,6 @@ void runClearCycle() {
     WiFi.mode(WIFI_OFF);
     btStop();
     setCpuFrequencyMhz(REFRESH_CPU_MHZ);
-
-    logf("LDO cooldown (light sleep) %d ms before first DRF...\n", POST_WIFI_COOLDOWN_MS);
-    Serial.flush();
-    esp_sleep_enable_timer_wakeup((uint64_t)POST_WIFI_COOLDOWN_MS * 1000ULL);
-    esp_light_sleep_start();
 
     logln("CLEAR: black fill...");
     EPD_13IN3E_Clear(EPD_13IN3E_BLACK);
