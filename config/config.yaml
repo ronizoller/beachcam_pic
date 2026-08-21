@@ -29,14 +29,32 @@ timing:
     timezone: "Asia/Jerusalem"
     # End time is automatically set to sunset (fetched daily from Open-Meteo)
 
-  # Inside ±N minutes of actual sunrise OR sunset, the scorer adds a warm-sky
-  # bonus on top of the base profile score. The "goodnight image" served on
-  # the panel all night long needs to be picked from this window — boosting
-  # warm-colored frames here makes the bonus strong enough to outscore
-  # high-composition daytime frames still in the candidate pool. The ESP32
-  # sleep schedule also targets sunset+20 (= raw sunset + the window pad)
-  # for one final wake to grab the locked-in goodnight image.
+  # Inside the golden-hour window the scorer adds a warm-sky bonus on top of
+  # the base profile score. The "goodnight image" served on the panel all
+  # night long is picked from this window — boosting warm-colored frames here
+  # makes the bonus strong enough to outscore high-composition daytime frames
+  # still in the candidate pool.
+  #
+  # Sunrise uses a symmetric ±N window:
   golden_hour_window_minutes: 15
+
+  # Sunset is ASYMMETRIC on purpose. On a west-facing Tel Aviv beach the best
+  # colour lands AFTER the sun is below the horizon — the afterglow typically
+  # peaks around sunset+10..+25, during civil twilight. The old symmetric
+  # ±15 window spent half its frames on bright pre-sunset sky and then stopped
+  # looking at sunset+15, right as the sky got good.
+  sunset_window_before_minutes: 5
+  sunset_window_after_minutes: 30
+
+  # Active hours (and the ESP's final "goodnight grab" wake) extend past the
+  # window by this pad so the last frames of the window are actually fetched
+  # and the ESP pulls only once the window has fully closed.
+  sunset_active_pad_minutes: 5
+
+  # Tighter sampling inside the golden-hour window. Sunset colour changes on a
+  # 1-2 minute timescale, so the normal 5-min cadence yields only ~6 frames
+  # and can miss the peak entirely.
+  golden_hour_fetch_interval_minutes: 2
 
 # ========== DISPLAY (E-Ink) ==========
 display:

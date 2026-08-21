@@ -7,7 +7,7 @@ Two scoring methods:
 """
 
 import logging
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from PIL import Image
@@ -38,6 +38,7 @@ def score_frame(
     image: Image.Image,
     profile: str = "jaffa",
     golden_hour: bool = False,
+    details: Optional[dict] = None,
 ) -> float:
     """
     Score a frame's composition quality.
@@ -50,6 +51,10 @@ def score_frame(
             to be enabled only inside the sunrise/sunset window so the
             "goodnight image" served overnight has a chance to win against
             high-scoring daytime frames still in the candidate pool.
+        details: Optional dict, populated in place with the score breakdown
+            (base, bonus, sub-signals). Used to archive per-frame diagnostics
+            so a night's candidates can be reviewed offline and the selection
+            second-guessed against what a human would have picked.
 
     Returns:
         Score, typically 0.0–1.0 but may exceed 1.0 when golden_hour=True
@@ -67,15 +72,26 @@ def score_frame(
     else:
         base = _score_composition(arr, cfg, profile)
 
+    if details is not None:
+        details.update({"profile": profile, "base": round(base, 4), "golden_hour": golden_hour})
+
     if not golden_hour:
+        if details is not None:
+            details["final"] = round(base, 4)
         return base
 
-    bonus = _golden_hour_bonus(arr)
+    bonus = _golden_hour_bonus(arr, details=details)
     # Additive with a fixed weight. A perfect warm sky adds 0.5 — strong
     # enough to outscore typical daytime frames (which sit around 0.2–0.5
     # base) without making mediocre warm scenes always win.
     weighted = bonus * 0.5
     final = base + weighted
+    if details is not None:
+        details.update({
+            "bonus": round(bonus, 4),
+            "bonus_weighted": round(weighted, 4),
+            "final": round(final, 4),
+        })
     logger.info(
         f"Golden-hour scoring [{profile}]: base={base:.3f}, "
         f"warm_sky_bonus={bonus:.3f} (weighted {weighted:.3f}), final={final:.3f}"
@@ -124,7 +140,7 @@ def _score_composition(arr: np.ndarray, cfg: dict, profile: str) -> float:
 
 # --- Golden-hour bonus (used during sunrise/sunset window) ---
 
-def _golden_hour_bonus(arr: np.ndarray) -> float:
+def _golden_hour_bonus(arr: np.ndarray, details: Optional[dict] = None) -> float:
     """
     Detect warm-colored sky in the upper portion of the frame.
 
@@ -169,6 +185,19 @@ def _golden_hour_bonus(arr: np.ndarray) -> float:
     # is the main pastel-dusk signal, tail breaks ties between similar
     # pastel coverage levels.
     warm_score = vivid_pct * 1.0 + pastel_pct * 0.5 + tail_score * 0.2
+
+    if details is not None:
+        # Mean brightness of the sky region gives context when reviewing:
+        # it separates "no warm colour" from "too dark to register".
+        details.update({
+            "vivid_pct": round(vivid_pct, 4),
+            "pastel_pct": round(pastel_pct, 4),
+            "p95_r_minus_b": round(p95_warm, 2),
+            "tail_score": round(tail_score, 4),
+            "warm_score": round(warm_score, 4),
+            "sky_mean_r": round(float(r.mean()), 1),
+            "sky_mean_b": round(float(b.mean()), 1),
+        })
 
     if warm_score < 0.05:
         return 0.0

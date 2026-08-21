@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Optional
 
 import pytz
-import schedule
 
 from config import get_config
 from fetcher import Fetcher
@@ -86,6 +85,17 @@ class BeachCamService:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.candidates_dir = self.data_dir / "candidates"
         self.candidates_dir.mkdir(parents=True, exist_ok=True)
+        # Golden-hour frames are archived here with their full score breakdown
+        # so a night's selection can be reviewed by eye afterwards. Unlike
+        # `candidates/`, these survive the pool being cleared — the candidate
+        # filenames are index-based and get overwritten every cycle.
+        #
+        # Retention is one calendar day: only today's directory is kept, so a
+        # night's frames stay reviewable through the night and are dropped the
+        # next morning (whichever comes first — the next golden-hour frame
+        # being archived, or the next service start).
+        self.golden_archive_dir = self.data_dir / "golden_archive"
+        self._prune_golden_archive()
 
         # Schedule guest beach for today
         self._schedule_guest()
@@ -115,7 +125,7 @@ class BeachCamService:
         # Crucially, (3) is SUPPRESSED during golden hour so the ESP's
         # mid-window pull doesn't wipe the early-window candidates. The
         # final goodnight image is then picked from the full window when
-        # the ESP wakes again at sunset+20.
+        # the ESP wakes again once the window has closed.
         in_golden = self._is_golden_hour()
         entered_golden = in_golden and not self._was_golden_hour_last_cycle
         self._was_golden_hour_last_cycle = in_golden
@@ -152,7 +162,7 @@ class BeachCamService:
         if self.image_pulled and in_golden and not clear_reason:
             logger.info(
                 "ESP pulled during golden hour — preserving candidate pool; "
-                "next ESP wake at sunset+20 will pick from the full window"
+                "next ESP wake (after the window closes) will pick from the full window"
             )
         self.image_pulled = False
 
@@ -229,12 +239,33 @@ class BeachCamService:
         # of the base profile so golden-hour frames can outscore daytime
         # candidates still in the pool — this is what locks in the "goodnight
         # image" the panel shows all night.
-        golden = self._is_golden_hour()
-        score = score_frame(cropped_img, profile=scoring_profile, golden_hour=golden)
+        golden_phase = self._golden_phase()
+        golden = golden_phase is not None
+        score_details: dict = {}
+        score = score_frame(
+            cropped_img,
+            profile=scoring_profile,
+            golden_hour=golden,
+            details=score_details,
+        )
 
         # --- Step 6: Save candidate ---
         candidate_path = self.candidates_dir / f"candidate_{len(self._candidates):03d}.png"
         cropped_img.save(candidate_path)
+
+        # Archive sunset frames for offline review of the selection. Sunrise is
+        # deliberately excluded: the sunset pick is the one that gets locked in
+        # on the panel all night, so it's the only one worth second-guessing,
+        # and archiving both just clutters the directory being reviewed.
+        if golden_phase == "sunset":
+            self._archive_golden_frame(
+                cropped_img,
+                phase=golden_phase,
+                score=score,
+                details=score_details,
+                camera=fetch_result.camera_name,
+                filter_reason=None if filter_result.is_valid else filter_result.reason,
+            )
 
         self._candidates.append({
             "path": candidate_path,
@@ -427,6 +458,73 @@ class BeachCamService:
             return 0.0
         return max(c["score"] for c in self._candidates)
 
+    def _archive_golden_frame(
+        self,
+        image,
+        phase: str,
+        score: float,
+        details: dict,
+        camera: str,
+        filter_reason: Optional[str] = None,
+    ):
+        """
+        Save a golden-hour frame plus its score breakdown for later review.
+
+        Layout: data/golden_archive/<date>/sunset/HHMMSS_score0.812.png
+        with one JSON line per frame appended to manifest.jsonl in the same
+        directory. Score is in the filename so a directory listing sorted by
+        name is already almost a ranking, and the eye can compare the picked
+        frame against the rest without loading the manifest.
+
+        Best-effort: never let an archiving failure break the pipeline.
+        """
+        try:
+            now = datetime.now()
+            out_dir = self.golden_archive_dir / now.strftime("%Y-%m-%d") / phase
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            fname = f"{now.strftime('%H%M%S')}_score{score:.3f}.png"
+            image.save(out_dir / fname)
+
+            record = {
+                "time": now.isoformat(timespec="seconds"),
+                "file": fname,
+                "phase": phase,
+                "camera": camera,
+                "score": round(float(score), 4),
+                "filter_reason": filter_reason,
+            }
+            record.update(details)
+            with open(out_dir / "manifest.jsonl", "a") as f:
+                f.write(json.dumps(record) + "\n")
+
+            self._prune_golden_archive()
+        except Exception as e:
+            logger.warning(f"Failed to archive golden frame: {e}")
+
+    def _prune_golden_archive(self):
+        """
+        Keep only today's archive directory.
+
+        A sunset's frames therefore stay on disk all night (same calendar day)
+        and are removed the next morning, when the first sunrise frame is
+        archived or the service next starts — whichever happens first.
+        """
+        if not self.golden_archive_dir.exists():
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        for day_dir in sorted(self.golden_archive_dir.iterdir()):
+            if not day_dir.is_dir() or day_dir.name == today:
+                continue
+            # Depth-first: reverse-sorted paths put files before their parent.
+            for sub in sorted(day_dir.rglob("*"), reverse=True):
+                if sub.is_file():
+                    sub.unlink()
+                else:
+                    sub.rmdir()
+            day_dir.rmdir()
+            logger.info(f"Pruned golden archive day {day_dir.name}")
+
     def _clear_candidates(self, reason: str = ""):
         """Remove all candidate files and reset the list."""
         for candidate in self._candidates:
@@ -465,10 +563,11 @@ class BeachCamService:
         """Calculate how long ESP32 should sleep.
 
         During the day: default interval (30 min), but capped so the ESP wakes
-        exactly at sunset+20 — that's the "goodnight grab" wake, where it pulls
-        the final locked-in sunset image that stays on the panel all night.
+        exactly when the sunset window closes — that's the "goodnight grab"
+        wake, where it pulls the final locked-in sunset image that stays on the
+        panel all night. See _sunset_pad_minutes.
 
-        At night (after sunset+20): until next sunrise.
+        At night (after the window has closed): until next sunrise.
         """
         default = int(self.config.timing.get("esp_sleep_minutes", 30))
 
@@ -480,11 +579,16 @@ class BeachCamService:
         sunset_raw = sun_times.get("sunset_raw")
         sunrise_raw = sun_times.get("sunrise_raw") or active_hours.get("start", "06:00")
 
-        # Compute the "goodnight grab" target: sunset + 20 min (today, in local tz).
+        # Compute the "goodnight grab" target: the moment the sunset window has
+        # fully closed (raw sunset + window-after + pad), so the ESP pulls the
+        # final locked-in pick rather than a mid-window one.
         goodnight_target = None
         if sunset_raw:
             h, m = map(int, sunset_raw.split(":"))
-            goodnight_target = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(minutes=20)
+            goodnight_target = (
+                now.replace(hour=h, minute=m, second=0, microsecond=0)
+                + timedelta(minutes=self._sunset_pad_minutes())
+            )
 
         # If goodnight_target is still in the future today, sleep toward it.
         # min() caps daytime cycles at default 30; max() floors at 5 min so we
@@ -498,7 +602,7 @@ class BeachCamService:
             )
             return sleep
 
-        # Past today's sunset+20 — sleep until tomorrow's sunrise.
+        # Past today's goodnight grab — sleep until tomorrow's sunrise.
         sunrise_hour, sunrise_min = map(int, sunrise_raw.split(":"))
         next_sunrise = now.replace(hour=sunrise_hour, minute=sunrise_min, second=0, microsecond=0)
         if next_sunrise <= now:
@@ -507,10 +611,43 @@ class BeachCamService:
         logger.info(f"ESP32 night sleep: {minutes}min (until sunrise at {sunrise_raw})")
         return max(minutes, default)
 
+    def _golden_windows(self) -> list:
+        """
+        Golden-hour windows as (sun_times key, minutes_before, minutes_after).
+
+        Sunrise is symmetric. Sunset is deliberately NOT: on a west-facing
+        beach the afterglow peaks well after the sun drops below the horizon
+        (roughly sunset+10..+25), so the window leans late. A symmetric window
+        wastes half its frames on bright pre-sunset sky and stops looking
+        before the sky peaks.
+        """
+        timing = self.config.timing
+        sunrise_w = int(timing.get("golden_hour_window_minutes", 15))
+        return [
+            ("sunrise_raw", sunrise_w, sunrise_w),
+            (
+                "sunset_raw",
+                int(timing.get("sunset_window_before_minutes", 5)),
+                int(timing.get("sunset_window_after_minutes", 30)),
+            ),
+        ]
+
+    def _sunset_pad_minutes(self) -> int:
+        """
+        Minutes past raw sunset that active hours (and the ESP's final
+        goodnight-grab wake) extend to. Must be >= the sunset window's
+        "after" value, otherwise fetching stops mid-window and the tail of
+        the window — the best part — is never captured.
+        """
+        timing = self.config.timing
+        after = int(timing.get("sunset_window_after_minutes", 30))
+        pad = int(timing.get("sunset_active_pad_minutes", 5))
+        return after + pad
+
     def _is_golden_hour(self) -> bool:
         """
-        True if we're within ±N minutes of the actual sunrise OR sunset (where
-        N defaults to 15, configurable via timing.golden_hour_window_minutes).
+        True inside the sunrise or sunset golden-hour window (see
+        _golden_windows for the asymmetry).
 
         Inside this window the scorer adds a warm-sky bonus on top of the
         base profile score, so the "goodnight image" served all night has a
@@ -520,21 +657,37 @@ class BeachCamService:
         if not sun_times:
             return False
 
-        window = int(self.config.timing.get("golden_hour_window_minutes", 15))
+        active_hours = self.config.timing.get("active_hours", {})
+        tz = pytz.timezone(active_hours.get("timezone", "UTC"))
+        now = datetime.now(tz)
+
+        return self._golden_phase() is not None
+
+    def _golden_phase(self) -> Optional[str]:
+        """
+        Which golden-hour window we're inside: "sunrise", "sunset", or None.
+
+        Used both by _is_golden_hour and by the archiver, which files frames
+        under the phase they belong to.
+        """
+        sun_times = self._get_sun_times()
+        if not sun_times:
+            return None
 
         active_hours = self.config.timing.get("active_hours", {})
         tz = pytz.timezone(active_hours.get("timezone", "UTC"))
         now = datetime.now(tz)
 
-        for key in ("sunrise_raw", "sunset_raw"):
+        for key, before, after in self._golden_windows():
             t_str = sun_times.get(key)
             if not t_str:
                 continue
             h, m = map(int, t_str.split(":"))
             event = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            if abs((now - event).total_seconds()) <= window * 60:
-                return True
-        return False
+            delta_min = (now - event).total_seconds() / 60.0
+            if -before <= delta_min <= after:
+                return key.replace("_raw", "")
+        return None
 
     def _is_active_time(self) -> bool:
         """Check if current time is within active hours (sunrise to sunset)."""
@@ -586,20 +739,24 @@ class BeachCamService:
             response.raise_for_status()
             data = response.json()
 
-            # Sunrise: 15 min earlier to catch first light
+            # Sunrise: start early by the sunrise window so first light is caught.
+            sunrise_window = int(self.config.timing.get("golden_hour_window_minutes", 15))
             sunrise_iso = data["daily"]["sunrise"][0]
             sunrise_dt = datetime.strptime(sunrise_iso, "%Y-%m-%dT%H:%M")
-            sunrise_dt -= timedelta(minutes=15)
+            sunrise_dt -= timedelta(minutes=sunrise_window)
             sunrise_time = sunrise_dt.strftime("%H:%M")
 
-            # Sunset: 15 min later to catch golden hour
+            # Sunset: stay active until the whole asymmetric sunset window has
+            # closed, plus a small pad. Previously hardcoded +15, which cut
+            # fetching off at sunset+15 and lost the entire afterglow.
+            sunset_pad = self._sunset_pad_minutes()
             sunset_iso = data["daily"]["sunset"][0]
             sunset_dt = datetime.strptime(sunset_iso, "%Y-%m-%dT%H:%M")
-            sunset_dt += timedelta(minutes=15)
+            sunset_dt += timedelta(minutes=sunset_pad)
             sunset_time = sunset_dt.strftime("%H:%M")
 
             # Keep raw values too — the active-hours boundary uses the padded
-            # times (±15 min), but the golden-hour window and the sunset+20
+            # times (padded), but the golden-hour window and the goodnight-grab
             # ESP wake target need the unpadded times.
             sunrise_raw = sunrise_iso.split('T')[1][:5]
             sunset_raw = sunset_iso.split('T')[1][:5]
@@ -716,20 +873,39 @@ class BeachCamService:
         During active hours: fetch every interval.
         At night: sleep until sunrise.
         """
-        interval = self.config.timing.get("fetch_interval_minutes", 5)
+        interval = int(self.config.timing.get("fetch_interval_minutes", 5))
+        golden_interval = int(
+            self.config.timing.get("golden_hour_fetch_interval_minutes", interval)
+        )
 
         # Run immediately on start
         self.fetch_and_process()
+        last_fetch = time.monotonic()
 
-        # Schedule periodic runs
-        schedule.every(interval).minutes.do(self.fetch_and_process)
-        logger.info(f"Scheduled fetch every {interval} minutes")
+        # Hand-rolled cadence instead of a fixed `schedule` job: the interval
+        # has to shrink inside the golden-hour window, where sunset colour
+        # changes on a 1-2 min timescale and a 5-min cadence yields only ~6
+        # frames for the whole window.
+        logger.info(
+            f"Fetch cadence: {interval}min normally, {golden_interval}min during golden hour"
+        )
 
         self._running = True
+        last_cadence = None
         while self._running:
             if not self._debug and not self._is_active_time():
                 self._sleep_until_sunrise()
-            schedule.run_pending()
+                last_fetch = float("-inf")  # fetch immediately on waking
+
+            cadence = golden_interval if self._is_golden_hour() else interval
+            if cadence != last_cadence:
+                logger.info(f"Fetch cadence now {cadence}min")
+                last_cadence = cadence
+
+            if time.monotonic() - last_fetch >= cadence * 60:
+                self.fetch_and_process()
+                last_fetch = time.monotonic()
+
             time.sleep(1)
 
     def _sleep_until_sunrise(self):
