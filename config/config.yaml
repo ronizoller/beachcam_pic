@@ -78,7 +78,10 @@ display:
   # uses more of its gamut. Contrast boost helps separate sky/sea/sand into
   # distinct quantized regions instead of a mid-tone mush. 1.0 = no change.
   # Tune in increments of 0.1; values above 1.7 typically over-saturate.
-  saturation: 1.2
+  # Lowered 1.2 -> 1.05: at 1.2 neutral haze was being pushed far enough
+  # toward the chromatic anchors that pale sky/sand quantized to red and
+  # green speckle (22% of the frame combined), both dark inks on Spectra 6.
+  saturation: 1.05
   contrast: 1.0
   # Gamma curve applied before the linear brightness multiplier. >1.0 lifts
   # midtones (sea, vegetation, shadows on sand) while preserving highlights

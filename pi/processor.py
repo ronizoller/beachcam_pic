@@ -34,22 +34,40 @@ PALETTES = {
     # (0,0,255)). Calibrated values keep the chromatic colors in play and the
     # output looks much more saturated. Tweak to taste — these are a starting
     # estimate based on typical Spectra 6 measurements.
+    # IMPORTANT: these numbers are *match targets* for the nearest-colour
+    # quantizer, NOT what the panel displays — firmware rgbToPanel6() reclassifies
+    # them into 6 fixed inks. So moving an anchor TOWARD the midtones GROWS its
+    # share of the image, and moving it AWAY shrinks it. Panel brightness is
+    # therefore governed by how much area lands on white/yellow ink, not by
+    # gamma or the brightness multiplier.
     "6color": [
-        (40, 40, 40),       # Black anchor pulled brighter so the equidistant
-                            # plane between black and white shifts up; fewer
-                            # mid-gray pixels (shadows, dim sky) collapse to
-                            # black. Still maps to panel BLACK in firmware
-                            # (its check is brightness < 50).
-        (235, 230, 220),    # White (paper-like, slightly warm)
+        (15, 15, 15),       # Black. Anchor pushed DOWN (was 40) to shrink black's
+                            # territory: the neutral black/white boundary moves
+                            # 135 -> 113, so mid-grays (shadows, dim sky, hazy
+                            # sea) become white ink instead of black. The old
+                            # comment here claimed raising the anchor reduced
+                            # black coverage — it does the opposite. Raising it
+                            # shifts the equidistant plane UP, putting MORE
+                            # pixels on the black side. Keep < 50 so firmware
+                            # still classifies this as BLACK.
+        (215, 212, 205),    # White (paper-like, slightly warm). Anchor pulled
+                            # DOWN (was 235) so white claims more midtones.
+                            # Keep the channel mean > 200 and the channels within
+                            # 30 of each other or firmware drops out of its clean
+                            # WHITE branch.
         (40, 70, 150),      # Blue (muted default, not saturated primary —
                             # most cameras override this via PROFILE_OVERRIDES)
         (225, 185, 55),     # Yellow (mustard, not bright cyan-yellow)
-        (215, 75, 60),      # Red — bumped lighter/warmer so pink/salmon/peach
-                            # pixels (Dahab rocks, sunset, terracotta) map to
-                            # red instead of yellow. Doesn't change what the
-                            # panel renders — just expands red's territory in
-                            # the nearest-color quantizer.
-        (35, 140, 75),      # Green (forest, not bright green)
+        (175, 45, 40),      # Red — darkened and saturated (was 215,75,60). The
+                            # lighter value sat close to pale warm neutrals, so
+                            # hazy sky and tan sand quantized to red: measured
+                            # 16% of a beach frame as red ink, nearly all of it
+                            # dither speckle rather than real content. Red ink is
+                            # dark on Spectra 6, so that alone dimmed the panel.
+                            # Keep r > 150 and r > g+50, r > b+50 for firmware RED.
+        (30, 115, 50),      # Green (forest). Also darkened/saturated to stop sea
+                            # pixels landing on green. Keep the channel mean > 50
+                            # or firmware reclassifies it as BLACK.
     ],
     # 5-color palette (simpler)
     "5color": [
@@ -88,7 +106,9 @@ PROFILE_OVERRIDES = {
         # to white. (Previous very-light value of 130,185,220 pulled too
         # many pixels into white, washing out natural sea/sky colors.)
         "blue":  (75, 140, 195),
-        "green": (40, 130, 45),
+        # Darkened to shrink green's territory — sea pixels were landing on green
+        # ink (measured 5.9% of the frame), which reads dark on the panel.
+        "green": (30, 110, 40),
     },
     "beach": {
         # Same rationale for guest beach scenes — sea/sky should read as
