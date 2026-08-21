@@ -632,12 +632,27 @@ class BeachCamService:
             ),
         ]
 
+    def _sunset_active_end_minutes(self) -> int:
+        """
+        Minutes past raw sunset that FETCHING continues to. Deliberately equal
+        to the sunset window's end, not later.
+
+        If active hours outlast the window, frames fetched in the gap are
+        scored with no golden-hour bonus — and if the ESP happens to pull
+        during that gap, the pull clears the candidate pool (clear_on_pull is
+        only suppressed *inside* the window), so one dark post-sunset frame
+        becomes the sole candidate and wins. It then sits on the panel all
+        night in place of the sunset pick. Keeping the two equal makes that
+        gap non-existent: nothing is ever fetched after the window closes.
+        """
+        return int(self.config.timing.get("sunset_window_after_minutes", 30))
+
     def _sunset_pad_minutes(self) -> int:
         """
-        Minutes past raw sunset that active hours (and the ESP's final
-        goodnight-grab wake) extend to. Must be >= the sunset window's
-        "after" value, otherwise fetching stops mid-window and the tail of
-        the window — the best part — is never captured.
+        Minutes past raw sunset for the ESP's goodnight-grab wake. Sits a
+        little AFTER fetching stops so the ESP collects a fully settled pick.
+        A pull at this point still clears the pool, but that's harmless — no
+        further fetch can occur, so current.bmp keeps the sunset image.
         """
         timing = self.config.timing
         after = int(timing.get("sunset_window_after_minutes", 30))
@@ -749,7 +764,7 @@ class BeachCamService:
             # Sunset: stay active until the whole asymmetric sunset window has
             # closed, plus a small pad. Previously hardcoded +15, which cut
             # fetching off at sunset+15 and lost the entire afterglow.
-            sunset_pad = self._sunset_pad_minutes()
+            sunset_pad = self._sunset_active_end_minutes()
             sunset_iso = data["daily"]["sunset"][0]
             sunset_dt = datetime.strptime(sunset_iso, "%Y-%m-%dT%H:%M")
             sunset_dt += timedelta(minutes=sunset_pad)
