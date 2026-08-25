@@ -164,6 +164,20 @@ class BeachCamService:
                 self._save_guest_state()
                 logger.info(f"Guest beach starting: {self._guest_today['camera']['name']}")
 
+        # Hard guarantee that the day ends on the sunset image. A guest activated
+        # on the last pre-window ESP pull would otherwise stay active through the
+        # WHOLE golden window, because golden-hour pulls deliberately don't end a
+        # guest cycle (clear_on_pull is false inside the window) — filling the
+        # sunset archive with guest frames and leaving a guest on the panel all
+        # night. The scheduling cutoff makes this rare; this makes it impossible.
+        if in_golden and self._guest_active:
+            self._guest_active = False
+            self._guest_used_today = datetime.now().strftime("%Y-%m-%d")
+            self._save_guest_state()
+            logger.info(
+                "Golden hour started — retiring active guest so the day ends on the sunset"
+            )
+
         # Always reset the pull flag so it doesn't persist across cycles.
         # During golden hour, we log the suppression so the behavior is visible.
         if self.image_pulled and in_golden and not clear_reason:
@@ -346,6 +360,23 @@ class BeachCamService:
         logger.info("Pipeline complete!")
         return True
 
+    def _guest_cutoff_minutes(self) -> Optional[int]:
+        """
+        Latest minute-of-day at which a guest beach may start.
+
+        The day must finish on the sunset image, so guests are kept clear of
+        sunset by guest_beaches.min_minutes_before_sunset. Previously the
+        schedule ran all the way to the padded sunset time (sunset+30), so a
+        guest could start inside the golden window.
+        """
+        guest_config = self.config.get("guest_beaches", default={})
+        lead = int(guest_config.get("min_minutes_before_sunset", 90))
+        sunset_raw = self._get_sun_times().get("sunset_raw")
+        if not sunset_raw:
+            return None
+        h, m = map(int, sunset_raw.split(":"))
+        return h * 60 + m - lead
+
     def _load_guest_state(self):
         """
         Restore guest scheduling from disk.
@@ -419,8 +450,13 @@ class BeachCamService:
         end_minutes = end_h * 60 + end_m
         esp_interval = self.config.timing.get("esp_sleep_minutes", 30)
 
+        cutoff = self._guest_cutoff_minutes()
+        if cutoff is not None:
+            end_minutes = min(end_minutes, cutoff)
+
         wake_times = list(range(start_minutes, end_minutes, esp_interval))
         if not wake_times:
+            logger.info("No guest slot available before today's sunset cutoff")
             return
 
         trigger_time = random.choice(wake_times)
@@ -459,6 +495,16 @@ class BeachCamService:
         tz = pytz.timezone(tz_name)
         now = datetime.now(tz)
         now_minutes = now.hour * 60 + now.minute
+
+        cutoff = self._guest_cutoff_minutes()
+        if cutoff is not None and now_minutes >= cutoff:
+            logger.info(
+                "Past the guest cutoff — the day must end on the sunset image, skipping guest"
+            )
+            self._guest_used_today = today
+            self._save_guest_state()
+            return False
+
         trigger = self._guest_today["trigger_minutes"]
 
         if now_minutes < trigger:

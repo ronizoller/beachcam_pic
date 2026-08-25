@@ -139,6 +139,12 @@ weather:
 # Once per day, at a random time, show a different beach
 guest_beaches:
   enabled: true
+  # The day must always END on the sunset image, never on a guest beach.
+  # Guest start times are held this many minutes clear of raw sunset, which
+  # leaves time for the guest to be shown AND replaced by the main camera
+  # before the golden window opens. Any guest still active when the window
+  # starts is retired immediately regardless of this value.
+  min_minutes_before_sunset: 90
   cameras:
     # --- Verified live ---
     - name: "Baleal"
