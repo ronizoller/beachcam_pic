@@ -159,6 +159,8 @@ class Processor:
         contrast = float(display.get("contrast", 1.0))
         brightness = float(display.get("brightness", 1.0))
         gamma = float(display.get("gamma", 1.0))
+        warm_r = float(display.get("warm_gain_r", 1.0))
+        warm_b = float(display.get("warm_gain_b", 1.0))
 
         # If the panel is mounted rotated 90° (CW or CCW), render against a
         # landscape canvas so the overlay text and aspect ratio look right
@@ -197,6 +199,20 @@ class Processor:
         if brightness != 1.0:
             img = ImageEnhance.Brightness(img).enhance(brightness)
             logger.debug(f"Brightness x{brightness}")
+        # Warm channel gains — the "reddish filter". Applied last among the photo
+        # adjustments and BEFORE the overlay, so the neutral-gray pills stay
+        # neutral. Per-channel LUTs, same mechanism as the gamma step above.
+        #
+        # Measured effect on a real sunset frame at 1.10/0.94: brighter (bright
+        # ink 45.2% -> 51.9%) but LESS colourful overall (63.4% -> 59.2%),
+        # because it converts blue sea into white and red — blue drops 31% ->
+        # 20%. Set both back to 1.0 to disable.
+        if warm_r != 1.0 or warm_b != 1.0:
+            r_lut = [min(255, int(round(i * warm_r))) for i in range(256)]
+            g_lut = list(range(256))
+            b_lut = [min(255, int(round(i * warm_b))) for i in range(256)]
+            img = img.point(r_lut + g_lut + b_lut)
+            logger.debug(f"Warm gain R x{warm_r} B x{warm_b}")
 
         if overlay_config.get("enabled", True) and weather_data:
             img = self._add_pill_overlay(img, weather_data, overlay_config)

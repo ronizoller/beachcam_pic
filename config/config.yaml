@@ -109,6 +109,16 @@ display:
   # brightness multiplier, which always clips highlights first.
   # 1.0 = no change, 1.4 = moderate lift, 1.7 = strong lift, 2.0+ = washed.
   gamma: 1.3
+  # "Reddish filter" — per-channel gains applied after gamma, before the
+  # overlay. Pushes warm pixels toward the red/yellow anchors.
+  #
+  # Trade-off, measured by re-rendering a real sunset frame through the full
+  # pipeline at these values: BRIGHTER (bright ink 45.2% -> 51.9%) but LESS
+  # colourful (63.4% -> 59.2%), because blue sea converts to white and red —
+  # blue 31% -> 20%. The sea reads less like sea and more like a warm wash.
+  # 1.0 / 1.0 disables. Milder: 1.05 / 0.97.
+  warm_gain_r: 1.10
+  warm_gain_b: 0.94
   # Final linear brightness multiplier after gamma. Use sparingly — gamma
   # is the preferred lever. 1.0 = no additional lift.
   brightness: 1.0
