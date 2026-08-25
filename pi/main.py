@@ -270,6 +270,7 @@ class BeachCamService:
         self._candidates.append({
             "path": candidate_path,
             "score": score,
+            "sharpness": score_details.get("sharpness", 0.0),
             "camera": fetch_result.camera_name,
             "hash": filter_result.image_hash if filter_result.is_valid else None,
             "guest": is_guest,
@@ -447,10 +448,45 @@ class BeachCamService:
         return camera
 
     def _pick_best(self) -> Optional[dict]:
-        """Pick the highest-scoring candidate."""
+        """
+        Pick the best candidate: highest score, then sharpest among near-ties.
+
+        The colour terms stop discriminating once two frames are within a few
+        thousandths of each other — on 2026-08-22 the top two differed by
+        0.0084 with identical base scores, yet one was visibly soft (2.6x less
+        edge energy) because the webcam degrades as light falls. Score alone
+        had no way to tell them apart.
+
+        Sharpness is applied as a tie-break rather than a score term on
+        purpose: the sharpest frame of an evening is usually an early, bright,
+        colourless one, so given real weight it would outrank actual sunsets.
+        Confined to a narrow band below the leader, it only acts where the
+        score has genuinely run out of signal.
+        """
         if not self._candidates:
             return None
-        return max(self._candidates, key=lambda c: c["score"])
+        best = max(self._candidates, key=lambda c: c["score"])
+
+        margin = float(self.config.get(
+            "selection", "sharpness_tiebreak_margin", default=0.05))
+        if margin <= 0:
+            return best
+
+        contenders = [
+            c for c in self._candidates if best["score"] - c["score"] <= margin
+        ]
+        if len(contenders) <= 1:
+            return best
+
+        sharpest = max(contenders, key=lambda c: c.get("sharpness") or 0.0)
+        if sharpest is not best:
+            logger.info(
+                f"Sharpness tie-break: {len(contenders)} candidates within {margin} of "
+                f"{best['score']:.4f} — picked sharpness "
+                f"{sharpest.get('sharpness', 0):.1f} (score {sharpest['score']:.4f}) "
+                f"over sharpness {best.get('sharpness', 0):.1f}"
+            )
+        return sharpest
 
     def _best_score(self) -> float:
         """Get the best score so far."""

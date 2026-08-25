@@ -73,7 +73,12 @@ def score_frame(
         base = _score_composition(arr, cfg, profile)
 
     if details is not None:
-        details.update({"profile": profile, "base": round(base, 4), "golden_hour": golden_hour})
+        details.update({
+            "profile": profile,
+            "base": round(base, 4),
+            "golden_hour": golden_hour,
+            "sharpness": round(sharpness(arr), 2),
+        })
 
     if not golden_hour:
         if details is not None:
@@ -136,6 +141,35 @@ def _score_composition(arr: np.ndarray, cfg: dict, profile: str) -> float:
         f"buildings={buildings_pct:.0%})"
     )
     return score
+
+
+def sharpness(arr: np.ndarray) -> float:
+    """
+    Edge energy of a frame — the 90th percentile of the horizontal luminance
+    gradient.
+
+    Used to break near-ties in the candidate pool. Webcam frames get visibly
+    soft as light falls (longer exposure, heavier stream compression), and two
+    frames minutes apart can be indistinguishable on every colour term while
+    differing 2-3x here. Measured on a real pair: 16 vs 7 at p90 (73 vs 28 at
+    p99) for frames whose scores differed by 0.008.
+
+    Deliberately an ABSOLUTE edge measure, not a ratio. p99/median looks like
+    the natural "structure over noise" statistic but inverts on exactly the
+    cases that matter: a soft frame's median gradient collapses to ~1, which
+    inflates the ratio and rates it *higher* than the sharp frame.
+
+    Note this rises with light level as well as with focus, so it is only
+    meaningful BETWEEN frames close together in time — which is why it is a
+    tie-break within one candidate pool rather than a term in the score. The
+    sharpest frame of an evening is typically an early, bright, colourless one.
+
+    Returns:
+        p90 of |horizontal luminance gradient|, in 0-255 units.
+    """
+    lum = arr.mean(axis=2)
+    grad = np.abs(np.diff(lum, axis=1))
+    return float(np.percentile(grad, 90))
 
 
 # --- Golden-hour bonus (used during sunrise/sunset window) ---
