@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import random
 import signal
 import sys
@@ -97,6 +98,10 @@ class BeachCamService:
         self.golden_archive_dir = self.data_dir / "golden_archive"
         self._prune_golden_archive()
 
+        # Guest scheduling survives restarts — see _load_guest_state.
+        self._guest_state_path = self.data_dir / "guest_state.json"
+        self._load_guest_state()
+
         # Schedule guest beach for today
         self._schedule_guest()
 
@@ -152,9 +157,11 @@ class BeachCamService:
             if self._guest_active:
                 self._guest_active = False
                 self._guest_used_today = datetime.now().strftime("%Y-%m-%d")
+                self._save_guest_state()
                 logger.info("Guest beach served to ESP32, back to main camera")
             elif self._is_guest_cycle():
                 self._guest_active = True
+                self._save_guest_state()
                 logger.info(f"Guest beach starting: {self._guest_today['camera']['name']}")
 
         # Always reset the pull flag so it doesn't persist across cycles.
@@ -339,6 +346,51 @@ class BeachCamService:
         logger.info("Pipeline complete!")
         return True
 
+    def _load_guest_state(self):
+        """
+        Restore guest scheduling from disk.
+
+        All guest state used to live only in memory, so ANY restart wiped
+        _guest_used_today (the "already shown today" guard) and re-rolled
+        _guest_today's random trigger time. The trigger is drawn uniformly
+        across the whole day, so a restart in the afternoon had roughly a 50%
+        chance of landing on a time already past — firing a second guest on the
+        next ESP pull. With the watchdog rebooting this Pi about once a day,
+        that made duplicate guests the normal outcome rather than a rare race.
+
+        State older than today is ignored, so a new day starts clean.
+        """
+        try:
+            if not self._guest_state_path.exists():
+                return
+            data = json.loads(self._guest_state_path.read_text())
+            if data.get("date") != datetime.now().strftime("%Y-%m-%d"):
+                return
+            self._guest_today = data.get("guest_today")
+            self._guest_used_today = data.get("used_today")
+            self._guest_active = bool(data.get("active", False))
+            logger.info(
+                f"Restored guest state: used_today={self._guest_used_today}, "
+                f"active={self._guest_active}"
+            )
+        except Exception as e:
+            logger.warning(f"Could not restore guest state ({e}) — starting fresh")
+
+    def _save_guest_state(self):
+        """Persist guest state atomically after every transition."""
+        try:
+            payload = {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "guest_today": self._guest_today,
+                "used_today": self._guest_used_today,
+                "active": self._guest_active,
+            }
+            tmp = self._guest_state_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload))
+            os.replace(tmp, self._guest_state_path)
+        except Exception as e:
+            logger.warning(f"Could not save guest state: {e}")
+
     def _schedule_guest(self):
         """Pick a random trigger time for today's guest beach."""
         guest_config = self.config.get("guest_beaches", default={})
@@ -377,6 +429,7 @@ class BeachCamService:
             "trigger_minutes": trigger_time,
             "camera": None,
         }
+        self._save_guest_state()
         logger.info(
             f"Guest beach scheduled at {trigger_time // 60:02d}:{trigger_time % 60:02d} "
             f"(available: {', '.join(c['name'] for c in cameras)})"
@@ -416,9 +469,11 @@ class BeachCamService:
         if not daytime_cameras:
             logger.info("Guest trigger time passed but no cameras in daytime, skipping")
             self._guest_used_today = today
+            self._save_guest_state()
             return False
 
         self._guest_today["camera"] = random.choice(daytime_cameras)
+        self._save_guest_state()
         logger.info(
             f"Guest beach picked: {self._guest_today['camera']['name']} "
             f"(local time there: {self._local_hour_at(self._guest_today['camera'])}:00)"
