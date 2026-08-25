@@ -38,6 +38,7 @@ def score_frame(
     image: Image.Image,
     profile: str = "jaffa",
     golden_hour: bool = False,
+    sky_fraction: float = 0.15,
     details: Optional[dict] = None,
 ) -> float:
     """
@@ -51,6 +52,9 @@ def score_frame(
             to be enabled only inside the sunrise/sunset window so the
             "goodnight image" served overnight has a chance to win against
             high-scoring daytime frames still in the candidate pool.
+        sky_fraction: Fraction of the frame height, measured from the top, that
+            actually contains sky on this camera. Must match where the horizon
+            really is — see _golden_hour_bonus.
         details: Optional dict, populated in place with the score breakdown
             (base, bonus, sub-signals). Used to archive per-frame diagnostics
             so a night's candidates can be reviewed offline and the selection
@@ -85,7 +89,7 @@ def score_frame(
             details["final"] = round(base, 4)
         return base
 
-    bonus = _golden_hour_bonus(arr, details=details)
+    bonus = _golden_hour_bonus(arr, sky_fraction=sky_fraction, details=details)
     # Additive with a fixed weight. A perfect warm sky adds 0.5 — strong
     # enough to outscore typical daytime frames (which sit around 0.2–0.5
     # base) without making mediocre warm scenes always win.
@@ -174,7 +178,9 @@ def sharpness(arr: np.ndarray) -> float:
 
 # --- Golden-hour bonus (used during sunrise/sunset window) ---
 
-def _golden_hour_bonus(arr: np.ndarray, details: Optional[dict] = None) -> float:
+def _golden_hour_bonus(
+    arr: np.ndarray, sky_fraction: float = 0.15, details: Optional[dict] = None
+) -> float:
     """
     Detect warm-colored sky in the upper portion of the frame.
 
@@ -196,9 +202,18 @@ def _golden_hour_bonus(arr: np.ndarray, details: Optional[dict] = None) -> float
         Bonus between 0.0 (no warm sky) and 1.0 (sky strongly warm).
     """
     h = arr.shape[0]
-    # 60% covers the horizon line where the warm band often sits — at 50%
-    # the cutoff sometimes slices through the brightest part of the glow.
-    sky = arr[:int(h * 0.60), :, :]
+    # sky_fraction must match where the horizon ACTUALLY is on this camera.
+    # This used to be a flat 0.60, chosen on the assumption that the crop was
+    # sky-dominated. It isn't: on the Jaffa camera the horizon sits at 21.7% of
+    # the raw frame and crop_box removes the top 80 rows, leaving sky at 15.4%
+    # of the cropped height. So the "sky" region was ~74% SEA, diluting
+    # vivid_pct/pastel_pct roughly 2x and crediting warm-looking water as
+    # sunset colour on frames that had none.
+    #
+    # Re-scoring the 2026-08-22 archive at 0.15 vs 0.60: the top two flipped to
+    # match the human pick (0.716 vs 0.672, a 5x wider margin than 0.0084), and
+    # three false positives driven purely by sea pixels dropped to zero bonus.
+    sky = arr[:max(1, int(h * sky_fraction)), :, :]
     r, g, b = sky[:, :, 0], sky[:, :, 1], sky[:, :, 2]
 
     is_vivid = (r > b + 40) & (r > g + 5) & (r > 100)
@@ -224,6 +239,7 @@ def _golden_hour_bonus(arr: np.ndarray, details: Optional[dict] = None) -> float
         # Mean brightness of the sky region gives context when reviewing:
         # it separates "no warm colour" from "too dark to register".
         details.update({
+            "sky_fraction": round(sky_fraction, 3),
             "vivid_pct": round(vivid_pct, 4),
             "pastel_pct": round(pastel_pct, 4),
             "p95_r_minus_b": round(p95_warm, 2),

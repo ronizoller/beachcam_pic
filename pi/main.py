@@ -253,9 +253,11 @@ class BeachCamService:
         # --- Step 5: Score (profile depends on camera) ---
         if is_guest:
             scoring_profile = camera.get("scoring_profile", "beach")
+            sky_fraction = float(camera.get("sky_fraction", 0.15))
         else:
             main_camera = self.config.cameras[0] if self.config.cameras else {}
             scoring_profile = main_camera.get("scoring_profile", "jaffa")
+            sky_fraction = float(main_camera.get("sky_fraction", 0.15))
         # Inside ±N min of actual sunrise/sunset, add a warm-sky bonus on top
         # of the base profile so golden-hour frames can outscore daytime
         # candidates still in the pool — this is what locks in the "goodnight
@@ -267,6 +269,7 @@ class BeachCamService:
             cropped_img,
             profile=scoring_profile,
             golden_hour=golden,
+            sky_fraction=sky_fraction,
             details=score_details,
         )
 

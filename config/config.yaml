@@ -12,6 +12,12 @@ cameras:
     # Crop out the "(c)BeachCam Israel" watermark at the top
     # Format: [left, top, right, bottom]
     crop_box: [0, 80, 1920, 1080]
+    # Fraction of the CROPPED frame height that is actually sky, used by the
+    # golden-hour scorer. Measured on this camera: the horizon sits at row 234
+    # of the 1080-row raw frame, and crop_box drops the top 80, leaving sky at
+    # 154/1000 = 15.4% of the cropped height. The scorer previously assumed
+    # 60%, so three quarters of its "sky" was sea.
+    sky_fraction: 0.15
     wait_seconds: 0
 
 # ========== TIMING ==========
