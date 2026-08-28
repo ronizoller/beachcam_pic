@@ -57,7 +57,23 @@ PALETTES = {
                             # WHITE branch.
         (40, 70, 150),      # Blue (muted default, not saturated primary —
                             # most cameras override this via PROFILE_OVERRIDES)
-        (225, 185, 55),     # Yellow (mustard, not bright cyan-yellow)
+        (200, 180, 110),    # Yellow. Moved UP in blue (was 225,185,55) so dry
+                            # sand stops quantizing to white. Sand after the
+                            # gamma/warm-gain stage sits near (191,179,159):
+                            # 61.5 from the white anchor but 109.6 from the old
+                            # mustard yellow, because that anchor's b=55 is
+                            # nowhere near sand's b=159. Real sand is a PALE
+                            # warm neutral, not a saturated mustard, so white
+                            # won every time and the beach read as washed out.
+                            # Measured on a midday frame, beach region: yellow
+                            # 18.5% -> 31.4%, white 51.0% -> 43.0%, and bright
+                            # ink still rose 69.4% -> 74.4% — yellow is the only
+                            # bright chromatic ink, so this gains colour without
+                            # costing brightness. Sea is unaffected (blue 50.7%
+                            # -> 44.9%, green +1.0pp) since it is nowhere near
+                            # this anchor. Keep r > 150, g > 120, b < 150 or
+                            # firmware rgbToPanel6() drops out of its YELLOW
+                            # branch.
         (175, 45, 40),      # Red — darkened and saturated (was 215,75,60). The
                             # lighter value sat close to pale warm neutrals, so
                             # hazy sky and tan sand quantized to red: measured
