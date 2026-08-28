@@ -120,16 +120,37 @@ PROFILE_OVERRIDES = {
         # as a dim navy stripe, but saturated enough that those pixels
         # actually claim blue during quantization instead of collapsing
         # to white. (Previous very-light value of 130,185,220 pulled too
-        # many pixels into white, washing out natural sea/sky colors.)
-        "blue":  (75, 140, 195),
+        # many pixels into white, washing out natural sea/sky colors —
+        # re-measured 2026-08-28 and still true: at that value frame green
+        # jumps to 13.1% and sea blue actually DROPS to 58%.)
+        #
+        # Brightened 2026-08-28 (was 75,140,195) to stop the sea dithering
+        # into yellow. Bright turquoise shallows sit near (119,149,150) —
+        # 63 units from the old anchor, too far for blue to represent
+        # alone, so Floyd-Steinberg mixed in the yellow anchor to make up
+        # the difference. That is a DITHERING effect, not nearest-colour:
+        # the flipped pixels are cool (r-b = -31) and nowhere near yellow
+        # in hue, they were simply the cheapest available mixture. Lowering
+        # yellow's saturation instead made this worse, because a near-
+        # neutral bright anchor is exactly what the ditherer wants for
+        # mid-teal. Measured on a midday frame: sea yellow 25.4% -> 11.8%,
+        # sea blue 56.1% -> 66.4%, and the beach keeps its gain (yellow
+        # 30.8%, vs 20.6% before the palette work started).
+        "blue":  (105, 155, 188),
         # Darkened to shrink green's territory — sea pixels were landing on green
         # ink (measured 5.9% of the frame), which reads dark on the panel.
         "green": (30, 110, 40),
     },
     "beach": {
         # Same rationale for guest beach scenes — sea/sky should read as
-        # blue ink, not white.
-        "blue": (75, 140, 195),
+        # blue ink, not white — and the same 2026-08-28 brightening, since
+        # guest cams showed the same yellow-sea drift (Baleal sea yellow
+        # 14.0% -> 23.5% on the yellow change alone). This recovers most
+        # of it (-> 18.6%) but not all: these cams see Atlantic and
+        # tropical water, so a jaffa-tuned anchor is a compromise. If a
+        # guest beach ever looks too warm, give it its own override rather
+        # than dragging this value around.
+        "blue": (105, 155, 188),
     },
 }
 
