@@ -117,8 +117,19 @@ display:
   # colourful (63.4% -> 59.2%), because blue sea converts to white and red —
   # blue 31% -> 20%. The sea reads less like sea and more like a warm wash.
   # 1.0 / 1.0 disables. Milder: 1.05 / 0.97.
-  warm_gain_r: 1.10
-  warm_gain_b: 0.94
+  #
+  # DISABLED 2026-09-02. Re-measured on a morning frame, where the filter does
+  # real damage: it inflates sand's warmth (r-b 37 -> 64 before quantization),
+  # which on an empty morning beach turns the whole lower third into a flat
+  # slab of yellow ink. Turning it off gives, on that frame:
+  #   beach yellow 40.6% -> 34.5%   sea blue 67.7% -> 75.8%
+  #   sea yellow    8.1% ->  4.7%   red ink   6.9% ->  3.2%
+  # The cost is bright ink 26.1% -> 21.5%, but brightness changes at this scale
+  # have never been visible on the glass (see the panel-brightness notes: the
+  # panel is at its reflectance ceiling), whereas the colour change is obvious.
+  # Set back to 1.10 / 0.94 to restore.
+  warm_gain_r: 1.0
+  warm_gain_b: 1.0
   # Final linear brightness multiplier after gamma. Use sparingly — gamma
   # is the preferred lever. 1.0 = no additional lift.
   brightness: 1.0
