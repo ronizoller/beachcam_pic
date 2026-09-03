@@ -145,6 +145,22 @@ overlay:
     wind_direction: true
     rating_badge: true  # Top-right surf quality badge
 
+# ========== NEXT-DAY FORECAST CARD ==========
+# Drawn bottom-right on the SUNSET frame only — the image the panel holds all
+# night, so it is the one worth spending on tomorrow's plan. Daytime frames and
+# guest beaches are untouched (the card scores Tel Aviv, so showing it over
+# Baleal would be wrong).
+forecast:
+  enabled: true
+  # The card lands exactly where the pill overlay draws, burying the sunset
+  # marker and the right-hand hour labels. By default the card wins and the
+  # pills are suppressed on that one frame — the card already carries wave,
+  # period and wind. Set true to keep the pills and accept the overlap.
+  keep_pills: false
+  width: 680
+  height: 388
+  margin: 46
+
 # ========== SURF PREFERENCES ==========
 # Used to calculate surf quality rating
 surf_preferences:

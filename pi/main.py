@@ -36,7 +36,8 @@ from filter import FrameFilter
 from processor import Processor
 from scorer import score_frame
 from server import Server
-from surf_data import SurfConditions, SurfDataFetcher, SurfPreferences
+from surf_data import (ForecastFetcher, SurfConditions, SurfDataFetcher,
+                       SurfPreferences)
 
 # Setup logging
 logging.basicConfig(
@@ -95,6 +96,10 @@ class BeachCamService:
         # night's frames stay reviewable through the night and are dropped the
         # next morning (whichever comes first — the next golden-hour frame
         # being archived, or the next service start).
+        # Tomorrow's forecast for the goodnight card. Caches by target date, so
+        # this is one API round-trip per day, not one per rendered frame.
+        self.forecast_fetcher = ForecastFetcher(self._surf_prefs())
+
         self.golden_archive_dir = self.data_dir / "golden_archive"
         self._prune_golden_archive()
 
@@ -328,7 +333,17 @@ class BeachCamService:
             color_profile = main_camera.get("scoring_profile")
 
         # --- Step 8: Process for E-Ink (resize, preprocess, dither, overlay) ---
-        processed_img = self.processor.process(best_img, weather_data, color_profile=color_profile)
+        # The forecast card rides ONLY on the sunset frame — that is the image
+        # the panel holds all night, so it is the one worth spending on
+        # tomorrow's plan. Guest beaches never get it: the card scores Tel Aviv
+        # conditions, and showing them over Baleal would be plainly wrong.
+        forecast = None
+        if golden_phase == "sunset" and not best.get("guest"):
+            forecast = self._get_forecast()
+
+        processed_img = self.processor.process(
+            best_img, weather_data, color_profile=color_profile, forecast=forecast,
+        )
 
         # --- Step 9: Save ---
         # Atomic write: save to a sibling .tmp and rename. Linux's rename is
@@ -597,6 +612,30 @@ class BeachCamService:
         if not self._candidates:
             return 0.0
         return max(c["score"] for c in self._candidates)
+
+    def _surf_prefs(self) -> SurfPreferences:
+        """Preferences from config — shared by the live badge and the forecast."""
+        c = self.config.get("surf_preferences", default={}) or {}
+        return SurfPreferences(
+            min_wave_cm=c.get("min_wave_cm", 60),
+            max_wave_cm=c.get("max_wave_cm", 110),
+            max_wind_kmh=c.get("max_wind_kmh", 25),
+        )
+
+    def _get_forecast(self):
+        """Tomorrow's scored forecast, or None if it can't be had."""
+        if not (self.config.get("forecast", default={}) or {}).get("enabled", True):
+            return None
+        try:
+            loc = (self.config.get("weather", default={}) or {}).get("location", {})
+            lat, lon = loc.get("lat"), loc.get("lon")
+            if lat is None or lon is None:
+                logger.warning("No weather.location lat/lon — skipping forecast")
+                return None
+            return self.forecast_fetcher.fetch(lat, lon, day_offset=1)
+        except Exception as e:
+            logger.error(f"Could not build forecast: {e}")
+            return None
 
     def _archive_golden_frame(
         self,

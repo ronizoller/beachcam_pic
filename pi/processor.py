@@ -166,6 +166,7 @@ class Processor:
         image: Image.Image,
         weather_data: dict = None,
         color_profile: str = None,
+        forecast=None,
     ) -> Image.Image:
         """
         Process image for E-Ink display.
@@ -180,6 +181,10 @@ class Processor:
         Args:
             image: Input PIL Image.
             weather_data: Optional dict with weather info for overlay.
+            forecast: Optional surf_data.DayForecast. When present (and
+                forecast.enabled), draws tomorrow's forecast card bottom-right
+                INSTEAD of the pill overlay. Only passed for the goodnight
+                frame; daytime frames keep the pills.
 
         Returns:
             Processed PIL Image ready for E-Ink.
@@ -251,9 +256,29 @@ class Processor:
             img = img.point(r_lut + g_lut + b_lut)
             logger.debug(f"Warm gain R x{warm_r} B x{warm_b}")
 
+        # The forecast card and the pills both live bottom-right, so they cannot
+        # both be drawn — the card lands directly on the pills and buries the
+        # sunset marker and the right-hand hour labels. On the goodnight frame
+        # the forecast IS the message, and the card already carries wave/period/
+        # wind, so the card wins and the pills are suppressed. Set
+        # forecast.keep_pills in config to trade that the other way.
+        fc_config = self.config.get("forecast", default={}) or {}
+        show_card = forecast is not None and fc_config.get("enabled", True)
+
         if overlay_config.get("enabled", True) and weather_data:
-            img = self._add_pill_overlay(img, weather_data, overlay_config)
-            logger.debug("Added overlay")
+            if show_card and not fc_config.get("keep_pills", False):
+                logger.debug("Forecast card shown — suppressing pill overlay")
+            else:
+                img = self._add_pill_overlay(img, weather_data, overlay_config)
+                logger.debug("Added overlay")
+
+        if show_card:
+            try:
+                img = self._add_forecast_card(img, forecast, fc_config)
+                logger.info("Added next-day forecast card")
+            except Exception as e:
+                # A broken card must never cost us the goodnight image.
+                logger.error(f"Forecast card failed, rendering without it: {e}")
 
         import time as _time
         t0 = _time.time()
@@ -350,6 +375,126 @@ class Processor:
         pal_img.putpalette(flat_pal)
         quantized = image.quantize(colors=len(palette), palette=pal_img, dither=0)
         return quantized.convert('RGB')
+
+    def _add_forecast_card(self, image: Image.Image, forecast, config: dict) -> Image.Image:
+        """
+        Tomorrow's surf forecast, bottom-right, drawn BEFORE dithering.
+
+        Design notes that are not obvious from the code:
+
+        * LIGHT scrim, dark ink. Green/red/blue are all DARK inks on Spectra 6,
+          so status colour on a dark panel is unreadable — a dark-scrim version
+          of this card rendered the green "best window" time invisible.
+        * The rating is encoded TWICE, as a 0/5/10 scale and as status colour,
+          so it survives either channel failing on the glass.
+        * The plot is STEPPED, not a line. A line implies the rating slides
+          continuously between samples; the data is one value per hour, and a
+          flat tread says "07:00 is a 9" and nothing more.
+        * Each tread takes its own hour's colour, but a RISER takes the lower of
+          the two hours it joins, so a riser from 6 to 9 never renders green and
+          implies a window that isn't there.
+        * Conditions sit directly under the window time. Proximity is what tells
+          you they describe those hours, which is why they carry no caption.
+        """
+        from surf_data import FLAT_RATING
+
+        img = image.copy()
+        d = ImageDraw.Draw(img)
+        W, H = img.size
+        SCRIM = (232, 229, 222)
+        BLACK, BLUE = (15, 15, 15), (105, 155, 188)
+        YELLOW, RED, GREEN = (200, 180, 110), (175, 45, 40), (30, 110, 40)
+
+        font_dir = Path(__file__).parent / "fonts"
+        def fnt(sz, medium=True):
+            name = "Jost-Medium.ttf" if medium else "Jost-Regular.ttf"
+            try:
+                return ImageFont.truetype(str(font_dir / name), sz)
+            except Exception:
+                return ImageFont.load_default()
+
+        def status(r):
+            if r >= 7: return GREEN
+            if r >= 4: return YELLOW
+            if r >= 1: return RED
+            return None
+
+        margin = int(config.get("margin", 46))
+        cw = int(config.get("width", 680))
+        ch = int(config.get("height", 388))
+        x1, y1 = W - margin, H - margin
+        x0, y0 = x1 - cw, y1 - ch
+        d.rounded_rectangle([x0, y0, x1, y1], radius=26, fill=SCRIM)
+
+        rows = forecast.hours
+        best = forecast.best_window()
+        flat = best is None or best[0] < FLAT_RATING
+
+        try:
+            label = datetime.strptime(forecast.date, "%Y-%m-%d").strftime("%a %-d %b")
+        except ValueError:
+            label = forecast.date
+        d.text((x0 + 30, y0 + 22), "TOMORROW", font=fnt(22), fill=BLACK)
+        d.text((x0 + 30, y0 + 48), label, font=fnt(30), fill=BLACK)
+
+        if flat:
+            d.text((x1 - 30, y0 + 30), "NOT WORTH IT", font=fnt(40), fill=RED, anchor="ra")
+            d.text((x1 - 30, y0 + 80),
+                   f"flat · max {max(h.wave for h in rows):.1f}m",
+                   font=fnt(21, False), fill=BLACK, anchor="ra")
+        else:
+            _, a, b = best
+            c = forecast.window_conditions(a, b)
+            d.text((x1 - 30, y0 + 18), f"{a:02d}:00", font=fnt(66), fill=GREEN, anchor="ra")
+            d.text((x1 - 30, y0 + 92), f"through {b:02d}:00",
+                   font=fnt(22, False), fill=BLACK, anchor="ra")
+            d.text((x1 - 30, y0 + 120),
+                   f"{c['wave']:.1f}m @ {c['period']:.0f}s · wind {c['wind']:.0f}km/h",
+                   font=fnt(21, False), fill=BLACK, anchor="ra")
+
+        # --- plot ---
+        px0, py0 = x0 + 66, y0 + 172
+        px1, py1 = x1 - 58, y1 - 92
+        for v in (0, 5, 10):
+            y = py1 - (py1 - py0) * v / 10
+            d.text((px0 - 12, y - 11), str(v), font=fnt(19, False), fill=BLACK, anchor="ra")
+            if v:
+                for xx in range(int(px0), int(px1), 13):
+                    d.line([(xx, y), (xx + 6, y)], fill=BLUE, width=2)
+
+        n = len(rows)
+        step = (px1 - px0) / n if n else 0
+        prev_y = None
+        for i, r in enumerate(rows):
+            y = py1 - (py1 - py0) * r.rating / 10
+            xa, xb = px0 + i * step, px0 + (i + 1) * step
+            d.line([(xa, y), (xb, y)], fill=status(r.rating) or BLACK, width=7)
+            if prev_y is not None:
+                riser = status(min(r.rating, rows[i - 1].rating)) or BLACK
+                d.line([(xa, prev_y), (xa, y)], fill=riser, width=5)
+            prev_y = y
+            if r.hour % 3 == 0:
+                d.text((xa + step / 2, py1 + 7), f"{r.hour:02d}",
+                       font=fnt(18, False), fill=BLACK, anchor="ma")
+
+        # Sunrise/sunset as vertical rules with their real clock times.
+        if rows:
+            h0 = rows[0].hour
+            for t, name in ((forecast.sunrise, "sunrise"), (forecast.sunset, "sunset")):
+                try:
+                    hh = int(t[:2]) + int(t[3:5]) / 60.0
+                except (ValueError, IndexError):
+                    continue
+                x = px0 + (hh - h0) * step + step / 2
+                if not (px0 - 2 <= x <= px1 + 2):
+                    continue
+                for yy in range(int(py0), int(py1), 10):
+                    d.line([(x, yy), (x, yy + 5)], fill=BLACK, width=2)
+                d.text((x, py1 + 30), t, font=fnt(19), fill=BLACK, anchor="ma")
+                d.text((x, py1 + 52), name, font=fnt(16, False), fill=BLACK, anchor="ma")
+
+        d.line([(px0, py1), (px1, py1)], fill=BLACK, width=2)
+        return img
 
     def _add_pill_overlay(
         self,
