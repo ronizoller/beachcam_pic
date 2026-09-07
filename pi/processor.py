@@ -383,16 +383,20 @@ class Processor:
         Design notes that are not obvious from the code:
 
         * LIGHT scrim, dark ink. Green/red/blue are all DARK inks on Spectra 6,
-          so status colour on a dark panel is unreadable — a dark-scrim version
-          of this card rendered the green "best window" time invisible.
-        * The rating is encoded TWICE, as a 0/5/10 scale and as status colour,
-          so it survives either channel failing on the glass.
+          so status colour on a DARK panel is unreadable — an early dark-scrim
+          version rendered the green window time invisible.
+        * ...but the same light scrim kills the one BRIGHT ink. Measured contrast
+          against the scrim as the panel renders it: black 9.0:1, red 4.5:1,
+          blue 4.2:1, green 3.8:1, and YELLOW 1.23:1 — invisible at any stroke
+          width. Yellow is therefore banned from this card. An earlier version
+          used it for "fair" and the line simply was not there on the glass.
+        * Colour is EMPHASIS, not the rating encoding. The whole day is black;
+          only the recommended window is green and thicker. The rating itself is
+          carried by height against a labelled 0/5/10 scale, so the card still
+          reads correctly if colour fails entirely.
         * The plot is STEPPED, not a line. A line implies the rating slides
           continuously between samples; the data is one value per hour, and a
           flat tread says "07:00 is a 9" and nothing more.
-        * Each tread takes its own hour's colour, but a RISER takes the lower of
-          the two hours it joins, so a riser from 6 to 9 never renders green and
-          implies a window that isn't there.
         * Conditions sit directly under the window time. Proximity is what tells
           you they describe those hours, which is why they carry no caption.
         """
@@ -403,7 +407,7 @@ class Processor:
         W, H = img.size
         SCRIM = (232, 229, 222)
         BLACK, BLUE = (15, 15, 15), (105, 155, 188)
-        YELLOW, RED, GREEN = (200, 180, 110), (175, 45, 40), (30, 110, 40)
+        RED, GREEN = (175, 45, 40), (30, 110, 40)
 
         font_dir = Path(__file__).parent / "fonts"
         def fnt(sz, medium=True):
@@ -413,20 +417,16 @@ class Processor:
             except Exception:
                 return ImageFont.load_default()
 
-        def status(r):
-            if r >= 7: return GREEN
-            if r >= 4: return YELLOW
-            if r >= 1: return RED
-            return None
-
         margin = int(config.get("margin", 46))
-        cw = int(config.get("width", 680))
-        ch = int(config.get("height", 388))
+        cw = int(config.get("width", 540))
+        ch = int(config.get("height", 300))
         x1, y1 = W - margin, H - margin
         x0, y0 = x1 - cw, y1 - ch
-        d.rounded_rectangle([x0, y0, x1, y1], radius=26, fill=SCRIM)
+        d.rounded_rectangle([x0, y0, x1, y1], radius=22, fill=SCRIM)
 
         rows = forecast.hours
+        if not rows:
+            return img
         best = forecast.best_window()
         flat = best is None or best[0] < FLAT_RATING
 
@@ -434,64 +434,63 @@ class Processor:
             label = datetime.strptime(forecast.date, "%Y-%m-%d").strftime("%a %-d %b")
         except ValueError:
             label = forecast.date
-        d.text((x0 + 30, y0 + 22), "TOMORROW", font=fnt(22), fill=BLACK)
-        d.text((x0 + 30, y0 + 48), label, font=fnt(30), fill=BLACK)
+        d.text((x0 + 26, y0 + 18), "TOMORROW", font=fnt(19), fill=BLACK)
+        d.text((x0 + 26, y0 + 40), label, font=fnt(26), fill=BLACK)
 
         if flat:
-            d.text((x1 - 30, y0 + 30), "NOT WORTH IT", font=fnt(40), fill=RED, anchor="ra")
-            d.text((x1 - 30, y0 + 80),
+            win_a = win_b = None
+            d.text((x1 - 26, y0 + 24), "NOT WORTH IT", font=fnt(32), fill=RED, anchor="ra")
+            d.text((x1 - 26, y0 + 64),
                    f"flat · max {max(h.wave for h in rows):.1f}m",
-                   font=fnt(21, False), fill=BLACK, anchor="ra")
+                   font=fnt(18, False), fill=BLACK, anchor="ra")
         else:
-            _, a, b = best
-            c = forecast.window_conditions(a, b)
-            d.text((x1 - 30, y0 + 18), f"{a:02d}:00", font=fnt(66), fill=GREEN, anchor="ra")
-            d.text((x1 - 30, y0 + 92), f"through {b:02d}:00",
-                   font=fnt(22, False), fill=BLACK, anchor="ra")
-            d.text((x1 - 30, y0 + 120),
-                   f"{c['wave']:.1f}m @ {c['period']:.0f}s · wind {c['wind']:.0f}km/h",
-                   font=fnt(21, False), fill=BLACK, anchor="ra")
+            _, win_a, win_b = best
+            c = forecast.window_conditions(win_a, win_b)
+            d.text((x1 - 26, y0 + 14), f"{win_a:02d}:00", font=fnt(52), fill=GREEN, anchor="ra")
+            d.text((x1 - 26, y0 + 72), f"through {win_b:02d}:00",
+                   font=fnt(19, False), fill=BLACK, anchor="ra")
+            d.text((x1 - 26, y0 + 94),
+                   f"{c['wave']:.1f}m @ {c['period']:.0f}s · {c['wind']:.0f}km/h",
+                   font=fnt(18, False), fill=BLACK, anchor="ra")
 
         # --- plot ---
-        px0, py0 = x0 + 66, y0 + 172
-        px1, py1 = x1 - 58, y1 - 92
+        px0, py0 = x0 + 56, y0 + 128
+        px1, py1 = x1 - 46, y1 - 64
         for v in (0, 5, 10):
             y = py1 - (py1 - py0) * v / 10
-            d.text((px0 - 12, y - 11), str(v), font=fnt(19, False), fill=BLACK, anchor="ra")
+            d.text((px0 - 10, y - 9), str(v), font=fnt(16, False), fill=BLACK, anchor="ra")
             if v:
-                for xx in range(int(px0), int(px1), 13):
-                    d.line([(xx, y), (xx + 6, y)], fill=BLUE, width=2)
+                for xx in range(int(px0), int(px1), 12):
+                    d.line([(xx, y), (xx + 5, y)], fill=BLUE, width=1)
 
-        n = len(rows)
-        step = (px1 - px0) / n if n else 0
+        step = (px1 - px0) / len(rows)
         prev_y = None
         for i, r in enumerate(rows):
             y = py1 - (py1 - py0) * r.rating / 10
-            xa, xb = px0 + i * step, px0 + (i + 1) * step
-            d.line([(xa, y), (xb, y)], fill=status(r.rating) or BLACK, width=7)
+            xa = px0 + i * step
+            in_win = win_a is not None and win_a <= r.hour < win_b
+            d.line([(xa, y), (xa + step, y)],
+                   fill=GREEN if in_win else BLACK, width=8 if in_win else 5)
             if prev_y is not None:
-                riser = status(min(r.rating, rows[i - 1].rating)) or BLACK
-                d.line([(xa, prev_y), (xa, y)], fill=riser, width=5)
+                d.line([(xa, prev_y), (xa, y)], fill=BLACK, width=4)
             prev_y = y
             if r.hour % 3 == 0:
-                d.text((xa + step / 2, py1 + 7), f"{r.hour:02d}",
-                       font=fnt(18, False), fill=BLACK, anchor="ma")
+                d.text((xa + step / 2, py1 + 5), f"{r.hour:02d}",
+                       font=fnt(16, False), fill=BLACK, anchor="ma")
 
-        # Sunrise/sunset as vertical rules with their real clock times.
-        if rows:
-            h0 = rows[0].hour
-            for t, name in ((forecast.sunrise, "sunrise"), (forecast.sunset, "sunset")):
-                try:
-                    hh = int(t[:2]) + int(t[3:5]) / 60.0
-                except (ValueError, IndexError):
-                    continue
-                x = px0 + (hh - h0) * step + step / 2
-                if not (px0 - 2 <= x <= px1 + 2):
-                    continue
-                for yy in range(int(py0), int(py1), 10):
-                    d.line([(x, yy), (x, yy + 5)], fill=BLACK, width=2)
-                d.text((x, py1 + 30), t, font=fnt(19), fill=BLACK, anchor="ma")
-                d.text((x, py1 + 52), name, font=fnt(16, False), fill=BLACK, anchor="ma")
+        # Sunrise/sunset as dashed verticals with their real clock times.
+        h0 = rows[0].hour
+        for t in (forecast.sunrise, forecast.sunset):
+            try:
+                hh = int(t[:2]) + int(t[3:5]) / 60.0
+            except (ValueError, IndexError):
+                continue
+            x = px0 + (hh - h0) * step + step / 2
+            if not (px0 - 2 <= x <= px1 + 2):
+                continue
+            for yy in range(int(py0), int(py1), 9):
+                d.line([(x, yy), (x, yy + 4)], fill=BLACK, width=2)
+            d.text((x, py1 + 24), t, font=fnt(16), fill=BLACK, anchor="ma")
 
         d.line([(px0, py1), (px1, py1)], fill=BLACK, width=2)
         return img

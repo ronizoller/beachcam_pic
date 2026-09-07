@@ -157,8 +157,10 @@ forecast:
   # pills are suppressed on that one frame — the card already carries wave,
   # period and wind. Set true to keep the pills and accept the overlap.
   keep_pills: false
-  width: 680
-  height: 388
+  # Shrunk from 680x388 (-39% area) once the plot stopped needing room for a
+  # three-colour status ramp — see the contrast note in _add_forecast_card.
+  width: 540
+  height: 300
   margin: 46
 
 # ========== SURF PREFERENCES ==========
