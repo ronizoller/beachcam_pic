@@ -160,6 +160,10 @@ battery:
   # forever — including after you have charged it.
   max_age_hours: 6
   margin: 46
+  # Bare icon — no scrim, no text. It carries its own contrast via a black
+  # outline over a white body, so it reads on any photo underneath.
+  icon_width: 88
+  icon_height: 44
 
 # ========== NEXT-DAY FORECAST CARD ==========
 # Drawn bottom-right on the SUNSET frame only — the image the panel holds all

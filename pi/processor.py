@@ -393,48 +393,52 @@ class Processor:
     def _add_battery_warning(self, image: Image.Image, volts: float,
                              config: dict) -> Image.Image:
         """
-        Small low-battery pill, bottom-LEFT. Only drawn when actually low.
+        Bare low-battery icon, bottom-left. No scrim, no text.
 
-        Bottom-left because both other overlays live bottom-right: the pills on
-        daytime frames and the forecast card on the goodnight frame. Light scrim
-        with dark ink for the same reason as the forecast card — red is a DARK
-        ink on Spectra 6 and would vanish on a dark background, and yellow (the
-        obvious "warning" colour) is unusable here at 1.23:1 against a light
-        scrim. Red on light is the only combination that reads.
+        With no background panel to sit on, the glyph has to carry its own
+        contrast against whatever the photo happens to be doing underneath —
+        bright sand, dark sea, lit buildings. It does that by being opaque and
+        three-toned: a thick BLACK outline for edge definition against anything,
+        a WHITE body so the fill level reads, and RED for the charge remaining.
+        Each is a distinct ink, so the shape survives dithering.
+
+        Red is the only usable warning colour here: it is a dark ink and reads
+        on the white body, whereas yellow measures 1.23:1 against white ink and
+        would be invisible — the same constraint that shaped the forecast card.
         """
         img = image.copy()
         d = ImageDraw.Draw(img)
         W, H = img.size
-        SCRIM = (232, 229, 222)
-        BLACK, RED = (15, 15, 15), (175, 45, 40)
-
-        font_dir = Path(__file__).parent / "fonts"
-        def fnt(sz, medium=True):
-            name = "Jost-Medium.ttf" if medium else "Jost-Regular.ttf"
-            try:
-                return ImageFont.truetype(str(font_dir / name), sz)
-            except Exception:
-                return ImageFont.load_default()
+        BLACK, WHITE, RED = (15, 15, 15), (215, 212, 205), (175, 45, 40)
 
         margin = int(config.get("margin", 46))
-        pw, ph = 250, 62
-        x0, y1 = margin, H - margin
-        y0, x1 = y1 - ph, x0 + pw
-        d.rounded_rectangle([x0, y0, x1, y1], radius=ph // 2, fill=SCRIM)
+        bw = int(config.get("icon_width", 88))
+        bh = int(config.get("icon_height", 44))
+        stroke = 5
+        nub_w, nub_h = 9, bh // 3
 
-        # Battery glyph: outline + nub, filled proportionally to charge. 4.2V
-        # full, 3.2V empty — the usable span, not 0V, which would show a third
-        # of a bar on a pack that is actually flat.
-        bx, by = x0 + 22, y0 + 19
-        bw, bh = 46, 24
-        d.rounded_rectangle([bx, by, bx + bw, by + bh], radius=4, outline=BLACK, width=3)
-        d.rectangle([bx + bw + 3, by + 7, bx + bw + 8, by + bh - 7], fill=BLACK)
+        x0 = margin
+        y1 = H - margin
+        y0 = y1 - bh
+        x1 = x0 + bw
+
+        # Opaque white body first, so the photo never shows through the icon.
+        d.rounded_rectangle([x0, y0, x1, y1], radius=7, fill=WHITE)
+
+        # Charge remaining, mapped over the USABLE span (3.2V empty, 4.2V full)
+        # rather than from 0V — a genuinely flat pack must not look a third full.
         frac = max(0.0, min(1.0, (volts - 3.2) / (4.2 - 3.2)))
+        ix0, iy0 = x0 + stroke + 3, y0 + stroke + 3
+        ix1, iy1 = x1 - stroke - 3, y1 - stroke - 3
         if frac > 0.02:
-            d.rectangle([bx + 5, by + 5, bx + 5 + (bw - 10) * frac, by + bh - 5], fill=RED)
+            d.rectangle([ix0, iy0, ix0 + (ix1 - ix0) * frac, iy1], fill=RED)
 
-        d.text((bx + bw + 22, y0 + 14), f"{volts:.2f}V", font=fnt(26), fill=RED)
-        d.text((bx + bw + 22, y0 + 40), "charge me", font=fnt(15, False), fill=BLACK)
+        # Outline last so it stays crisp over the fill.
+        d.rounded_rectangle([x0, y0, x1, y1], radius=7, outline=BLACK, width=stroke)
+        d.rounded_rectangle(
+            [x1, y0 + (bh - nub_h) // 2, x1 + nub_w, y0 + (bh + nub_h) // 2],
+            radius=2, fill=BLACK,
+        )
         return img
 
     def _add_forecast_card(self, image: Image.Image, forecast, config: dict) -> Image.Image:
