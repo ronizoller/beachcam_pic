@@ -34,12 +34,19 @@ SCORING_PROFILES = {
 }
 
 
+# Below this mean sky brightness the frame is night, not golden hour, and the
+# warm-sky bonus is suppressed entirely. See the gate in _golden_hour_bonus.
+# Calibrated on the 2026-08-27 archive: night frame 103.7, real dusk 120.9/145.0.
+MIN_SKY_BRIGHTNESS = 110.0
+
+
 def score_frame(
     image: Image.Image,
     profile: str = "jaffa",
     golden_hour: bool = False,
     sky_fraction: float = 0.15,
     details: Optional[dict] = None,
+    min_sky_brightness: float = MIN_SKY_BRIGHTNESS,
 ) -> float:
     """
     Score a frame's composition quality.
@@ -89,7 +96,10 @@ def score_frame(
             details["final"] = round(base, 4)
         return base
 
-    bonus = _golden_hour_bonus(arr, sky_fraction=sky_fraction, details=details)
+    bonus = _golden_hour_bonus(
+        arr, sky_fraction=sky_fraction, details=details,
+        min_sky_brightness=min_sky_brightness,
+    )
     # Additive with a fixed weight. A perfect warm sky adds 0.5 — strong
     # enough to outscore typical daytime frames (which sit around 0.2–0.5
     # base) without making mediocre warm scenes always win.
@@ -179,7 +189,8 @@ def sharpness(arr: np.ndarray) -> float:
 # --- Golden-hour bonus (used during sunrise/sunset window) ---
 
 def _golden_hour_bonus(
-    arr: np.ndarray, sky_fraction: float = 0.15, details: Optional[dict] = None
+    arr: np.ndarray, sky_fraction: float = 0.15, details: Optional[dict] = None,
+    min_sky_brightness: float = MIN_SKY_BRIGHTNESS,
 ) -> float:
     """
     Detect warm-colored sky in the upper portion of the frame.
@@ -215,6 +226,32 @@ def _golden_hour_bonus(
     # three false positives driven purely by sea pixels dropped to zero bonus.
     sky = arr[:max(1, int(h * sky_fraction)), :, :]
     r, g, b = sky[:, :, 0], sky[:, :, 1], sky[:, :, 2]
+
+    # DARKNESS GATE. Sodium streetlights are warm, so once it is properly dark
+    # the lit Jaffa skyline scores as "vivid sunset" and the bonus pins to 1.0 —
+    # twice now (2026-08-27, 2026-09-10) the goodnight image was a blurry night
+    # shot of the old city that outscored the real dusk frames.
+    #
+    # Geometry does NOT fix this, which is the non-obvious part. Restricting the
+    # sample to the sea side kills the bonus on the GOOD frames too: at 19:29:51
+    # on 2026-08-27 the genuine dusk warmth was also on the city side (left third
+    # R-B +19.7 vs sea +8.1 tonight, +73.0 for the streetlights). Narrowing the
+    # band vertically does nothing either — the skyline occupies rows 0-45 as
+    # well, and the bonus stayed pinned at 1.000 under every band variant tried.
+    #
+    # Brightness separates them cleanly. On the 2026-08-27 archive the night
+    # frame is the darkest of the 14 (sky 103.7) while the two real dusk frames
+    # sit at 120.9 and 145.0. Re-scoring with this gate flips the winner from
+    # the streetlights (0.974) to the human pick (0.584 vs the night frame's
+    # 0.474). A sky this dark is not golden hour, whatever colour it is.
+    sky_brightness = float(sky.mean())
+    if details is not None:
+        details["sky_brightness"] = round(sky_brightness, 1)
+    if sky_brightness < min_sky_brightness:
+        if details is not None:
+            details.update({"vivid_pct": 0.0, "pastel_pct": 0.0, "warm_score": 0.0,
+                            "night_gated": True})
+        return 0.0
 
     is_vivid = (r > b + 40) & (r > g + 5) & (r > 100)
     is_pastel = (r > b + 5) & (r > 100) & ~is_vivid

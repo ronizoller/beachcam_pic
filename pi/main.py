@@ -274,6 +274,9 @@ class BeachCamService:
             cropped_img,
             profile=scoring_profile,
             golden_hour=golden,
+            min_sky_brightness=float(
+                self.config.timing.get("min_sky_brightness", 110)
+            ),
             sky_fraction=sky_fraction,
             details=score_details,
         )

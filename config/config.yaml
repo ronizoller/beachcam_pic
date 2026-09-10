@@ -49,6 +49,15 @@ timing:
   # peaks around sunset+10..+25, during civil twilight. The old symmetric
   # ±15 window spent half its frames on bright pre-sunset sky and then stopped
   # looking at sunset+15, right as the sky got good.
+  # Below this mean sky brightness a frame is night, not golden hour, and the
+  # warm-sky bonus is suppressed. Sodium streetlights are warm, so once it is
+  # properly dark the lit Jaffa skyline scores as a vivid sunset — twice the
+  # goodnight image ended up a blurry night shot of the old city. Calibrated on
+  # the 2026-08-27 archive: night frame 103.7, real dusk frames 120.9 and 145.0.
+  # Raise it if night shots still win; lower it if genuinely dim dusks are being
+  # rejected. 0 disables the gate.
+  min_sky_brightness: 110
+
   sunset_window_before_minutes: 5
   sunset_window_after_minutes: 30
 
