@@ -181,6 +181,14 @@ void setup() {
     logf("Surf E-Ink Frame (13.3\") - Boot #%d\n", bootCount);
     logln("=================================\n");
 
+    // Battery, read BEFORE DEV_Module_Init powers the panel. The refresh is the
+    // heaviest load in the cycle, so reading later would report the sag rather
+    // than the resting voltage. analogReadMilliVolts() applies the factory eFuse
+    // calibration — raw analogRead() is markedly non-linear on ESP32.
+    // The Pi parses this line straight out of the log it already POSTs, so this
+    // one print is the whole battery-telemetry transport.
+    logf("BATTERY: %.2fV\n", analogReadMilliVolts(EPD_BATTERY_PIN) * 2.0f / 1000.0f);
+
     // Bring up the panel hardware (GPIO config, power on).
     logln("DEV_Module_Init...");
     DEV_Module_Init();

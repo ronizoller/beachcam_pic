@@ -54,7 +54,16 @@
 #define EPD_CS_S_PIN    14   // [D6]
 #define EPD_RST_PIN     26   // [D3]
 #define EPD_DC_PIN      25   // [D2]
-#define EPD_BUSY_PIN    34   // [A2] input-only pin — fine, BUSY is read-only
+#define EPD_BUSY_PIN    17   // [D10] moved off A2/IO34 (2026-09-10): IO34 carries
+                             // the onboard battery divider, so BUSY had to vacate it.
+                             // D10 reused because it was already soldered from the
+                             // pre-2026-08 wiring, when it was CS_S. Full GPIO (not
+                             // input-only like A3), not a strapping pin, and free —
+                             // and IO16/17 are not PSRAM on WROOM-32E, as CS_M=16
+                             // already proves.
+#define EPD_BATTERY_PIN 34   // [A2] VBAT via 2x 1M divider (DFR0654 schematic), so
+                             // the pin reads half the pack voltage. ADC1, which is
+                             // the half that still works while WiFi is on.
 #define EPD_PWR_PIN     13   // [D7]
 
 

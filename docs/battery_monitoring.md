@@ -38,18 +38,24 @@ divider is only a weak 1 MΩ pull, so **the display works fine today** — the
 conflict is one-directional: you cannot *read* the battery through a pin the
 panel is driving.
 
-Move BUSY to `IO35 / A3`. On header **P3 that is the physically adjacent pin**
-(P3 pin 6 = A3, P3 pin 7 = A2), so it is a one-position move. Safe because:
+**BUSY now lives on `IO17 / D10`** (applied 2026-09-10). A3 was the first
+candidate, but D10 was already soldered from the pre-2026-08 wiring when it was
+`CS_S`, so it saves a rework. It is also the better pin:
 
-- IO34–39 are all input-only, and BUSY is read-only
-- neither pin has internal pull-ups, and `DEV_Config.cpp` asks for plain
-  `pinMode(EPD_BUSY_PIN, INPUT)` — so nothing changes electrically
-- both are **ADC1**, the half that still works while WiFi is on. ADC2 cannot be
-  read during WiFi at all, which is *why* BUSY moves rather than the battery
+- free in the map, and **not a strapping pin** (ESP32's are 0, 2, 5, 12, 15)
+- a **full GPIO**, not input-only like A3, so internal pull-ups are available if
+  ever needed (the driver asks for plain `INPUT`, so nothing depends on it)
+- **not PSRAM** — that is the WROVER; this is WROOM-32E, and `CS_M = 16` already
+  proves the 16/17 pair is usable
+- clear of the onboard LEDs (2/5), user button (27) and USB serial (1/3)
 
-```c
-#define EPD_BUSY_PIN    35   // [A3] input-only; moved off A2/IO34, the battery divider
-```
+⚠ **Trace the D10 wire before flashing.** It is left over from when D10 was
+`CS_S`. It must land on the panel's **BUSY** pin. If it still runs to the panel's
+CS_S, BUSY will read the chip-select line and the panel will hang at refresh.
+
+The battery stays on IO34 because both IO34 and IO35 are **ADC1** — the half that
+still works while WiFi is on. ADC2 cannot be read during WiFi at all, which is
+why BUSY was always the thing that had to move, not the battery.
 
 ### 2. Print the voltage at boot
 
