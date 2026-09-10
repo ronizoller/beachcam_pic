@@ -393,18 +393,21 @@ class Processor:
     def _add_battery_warning(self, image: Image.Image, volts: float,
                              config: dict) -> Image.Image:
         """
-        Bare low-battery icon, bottom-left. No scrim, no text.
+        Bare low-battery icon, TOP-RIGHT, with a transparent body.
 
-        With no background panel to sit on, the glyph has to carry its own
-        contrast against whatever the photo happens to be doing underneath —
-        bright sand, dark sea, lit buildings. It does that by being opaque and
-        three-toned: a thick BLACK outline for edge definition against anything,
-        a WHITE body so the fill level reads, and RED for the charge remaining.
-        Each is a distinct ink, so the shape survives dithering.
+        The interior is unfilled, so the photo shows through and only the
+        charge bar is solid. That costs the icon its own contrast, so it keeps
+        a thin WHITE keyline outside the black outline — the same halo trick
+        `_draw_wind_arrow` and `_draw_text_with_outline` already use in this
+        file. Without it the glyph disappears wherever the photo happens to be
+        dark, which on the goodnight frame is most of it.
 
-        Red is the only usable warning colour here: it is a dark ink and reads
-        on the white body, whereas yellow measures 1.23:1 against white ink and
-        would be invisible — the same constraint that shaped the forecast card.
+        Red for the charge bar because it is a dark ink that reads against both
+        the photo and the keyline; yellow measures 1.23:1 against white ink and
+        would be invisible — the constraint that also shaped the forecast card.
+
+        Top-right is the only free corner: bottom-right holds the pills and the
+        forecast card, and bottom-left is where the beach detail usually is.
         """
         img = image.copy()
         d = ImageDraw.Draw(img)
@@ -412,33 +415,36 @@ class Processor:
         BLACK, WHITE, RED = (15, 15, 15), (215, 212, 205), (175, 45, 40)
 
         margin = int(config.get("margin", 46))
-        bw = int(config.get("icon_width", 88))
-        bh = int(config.get("icon_height", 44))
-        stroke = 5
-        nub_w, nub_h = 9, bh // 3
+        bw = int(config.get("icon_width", 60))
+        bh = int(config.get("icon_height", 30))
+        stroke = 4
+        nub_w, nub_h = 7, bh // 3
+        radius = 6
 
-        x0 = margin
-        y1 = H - margin
-        y0 = y1 - bh
-        x1 = x0 + bw
+        x1 = W - margin - nub_w      # leave room for the nub inside the margin
+        x0 = x1 - bw
+        y0 = margin
+        y1 = y0 + bh
 
-        # Opaque white body first, so the photo never shows through the icon.
-        d.rounded_rectangle([x0, y0, x1, y1], radius=7, fill=WHITE)
+        nub = [x1, y0 + (bh - nub_h) // 2, x1 + nub_w, y0 + (bh + nub_h) // 2]
 
-        # Charge remaining, mapped over the USABLE span (3.2V empty, 4.2V full)
-        # rather than from 0V — a genuinely flat pack must not look a third full.
+        # White keyline first, drawn slightly larger so it reads as a halo.
+        d.rounded_rectangle([x0 - 2, y0 - 2, x1 + 2, y1 + 2],
+                            radius=radius + 2, outline=WHITE, width=stroke + 2)
+        d.rounded_rectangle([nub[0], nub[1] - 2, nub[2] + 2, nub[3] + 2],
+                            radius=2, outline=WHITE, width=3)
+
+        # Charge remaining, over the USABLE span (3.2V empty, 4.2V full) rather
+        # than from 0V — a genuinely flat pack must not look a third full.
         frac = max(0.0, min(1.0, (volts - 3.2) / (4.2 - 3.2)))
-        ix0, iy0 = x0 + stroke + 3, y0 + stroke + 3
-        ix1, iy1 = x1 - stroke - 3, y1 - stroke - 3
+        ix0, iy0 = x0 + stroke + 2, y0 + stroke + 2
+        ix1, iy1 = x1 - stroke - 2, y1 - stroke - 2
         if frac > 0.02:
             d.rectangle([ix0, iy0, ix0 + (ix1 - ix0) * frac, iy1], fill=RED)
 
-        # Outline last so it stays crisp over the fill.
-        d.rounded_rectangle([x0, y0, x1, y1], radius=7, outline=BLACK, width=stroke)
-        d.rounded_rectangle(
-            [x1, y0 + (bh - nub_h) // 2, x1 + nub_w, y0 + (bh + nub_h) // 2],
-            radius=2, fill=BLACK,
-        )
+        # Black outline last so it stays crisp over both keyline and fill.
+        d.rounded_rectangle([x0, y0, x1, y1], radius=radius, outline=BLACK, width=stroke)
+        d.rounded_rectangle(nub, radius=2, fill=BLACK)
         return img
 
     def _add_forecast_card(self, image: Image.Image, forecast, config: dict) -> Image.Image:
