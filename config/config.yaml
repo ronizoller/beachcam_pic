@@ -145,6 +145,22 @@ overlay:
     wind_direction: true
     rating_badge: true  # Top-right surf quality badge
 
+# ========== BATTERY ==========
+# The ESP has no battery telemetry until the firmware prints a "BATTERY: x.xxV"
+# line into the serial log it already POSTs to /log — see docs. Until then this
+# section is inert. Reported voltage also appears in /metadata.
+battery:
+  enabled: true
+  # Warn below this. 3.6 not 3.5: the LiPo curve is very steep at the bottom
+  # (3.4 -> 3.1 V is only ~5% of the pack), and measured runtime is ~4.8 days,
+  # so 3.5 would give roughly half a day of notice. 3.6 buys about a full day.
+  warn_volts: 3.6
+  # Ignore readings older than this. The ESP goes silent when the battery dies,
+  # so without an age limit the last gasp before death would pin the warning on
+  # forever — including after you have charged it.
+  max_age_hours: 6
+  margin: 46
+
 # ========== NEXT-DAY FORECAST CARD ==========
 # Drawn bottom-right on the SUNSET frame only — the image the panel holds all
 # night, so it is the one worth spending on tomorrow's plan. Daytime frames and

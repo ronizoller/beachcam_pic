@@ -343,6 +343,7 @@ class BeachCamService:
 
         processed_img = self.processor.process(
             best_img, weather_data, color_profile=color_profile, forecast=forecast,
+            battery_volts=self._get_battery_volts(),
         )
 
         # --- Step 9: Save ---
@@ -367,6 +368,7 @@ class BeachCamService:
             "weather": weather_data,
             "score": best["score"],
             "candidates_count": len(self._candidates),
+            "battery_volts": self._get_battery_volts(),
             "guest": best.get("guest", False),
         }
         metadata_path = self.data_dir / "metadata.json"
@@ -612,6 +614,33 @@ class BeachCamService:
         if not self._candidates:
             return 0.0
         return max(c["score"] for c in self._candidates)
+
+    def _get_battery_volts(self) -> Optional[float]:
+        """
+        Last battery voltage the ESP reported, or None if it never has.
+
+        Written by the /log handler when the ESP's serial dump contains a
+        "BATTERY: x.xx V" line. Returns None on a stale reading rather than
+        warning forever off a value from a battery that has since been charged
+        — the ESP is silent while flat, so the last reading before it died would
+        otherwise pin the warning on indefinitely.
+        """
+        path = self.data_dir / "battery.json"
+        if not path.exists():
+            return None
+        try:
+            with open(path) as f:
+                state = json.load(f)
+            volts = float(state["volts"])
+            stamp = datetime.fromisoformat(state["time"].rstrip("Z"))
+        except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError):
+            return None
+        max_age = float(
+            (self.config.get("battery", default={}) or {}).get("max_age_hours", 6)
+        )
+        if (datetime.utcnow() - stamp).total_seconds() > max_age * 3600:
+            return None
+        return volts
 
     def _surf_prefs(self) -> SurfPreferences:
         """Preferences from config — shared by the live badge and the forecast."""

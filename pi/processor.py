@@ -167,6 +167,7 @@ class Processor:
         weather_data: dict = None,
         color_profile: str = None,
         forecast=None,
+        battery_volts: float = None,
     ) -> Image.Image:
         """
         Process image for E-Ink display.
@@ -280,6 +281,19 @@ class Processor:
                 # A broken card must never cost us the goodnight image.
                 logger.error(f"Forecast card failed, rendering without it: {e}")
 
+        # Low-battery pill. Drawn on EVERY frame, not just the goodnight one —
+        # a warning you only see after sunset is a warning you may miss for a
+        # whole day, and the measured runtime is only ~5 days.
+        bat_config = self.config.get("battery", default={}) or {}
+        if battery_volts is not None and bat_config.get("enabled", True):
+            warn_at = float(bat_config.get("warn_volts", 3.6))
+            if battery_volts <= warn_at:
+                try:
+                    img = self._add_battery_warning(img, battery_volts, bat_config)
+                    logger.info(f"Low battery {battery_volts:.2f}V — drew warning")
+                except Exception as e:
+                    logger.error(f"Battery warning failed: {e}")
+
         import time as _time
         t0 = _time.time()
         img = self._reduce_colors(img, color_mode, dithering, color_profile)
@@ -375,6 +389,53 @@ class Processor:
         pal_img.putpalette(flat_pal)
         quantized = image.quantize(colors=len(palette), palette=pal_img, dither=0)
         return quantized.convert('RGB')
+
+    def _add_battery_warning(self, image: Image.Image, volts: float,
+                             config: dict) -> Image.Image:
+        """
+        Small low-battery pill, bottom-LEFT. Only drawn when actually low.
+
+        Bottom-left because both other overlays live bottom-right: the pills on
+        daytime frames and the forecast card on the goodnight frame. Light scrim
+        with dark ink for the same reason as the forecast card — red is a DARK
+        ink on Spectra 6 and would vanish on a dark background, and yellow (the
+        obvious "warning" colour) is unusable here at 1.23:1 against a light
+        scrim. Red on light is the only combination that reads.
+        """
+        img = image.copy()
+        d = ImageDraw.Draw(img)
+        W, H = img.size
+        SCRIM = (232, 229, 222)
+        BLACK, RED = (15, 15, 15), (175, 45, 40)
+
+        font_dir = Path(__file__).parent / "fonts"
+        def fnt(sz, medium=True):
+            name = "Jost-Medium.ttf" if medium else "Jost-Regular.ttf"
+            try:
+                return ImageFont.truetype(str(font_dir / name), sz)
+            except Exception:
+                return ImageFont.load_default()
+
+        margin = int(config.get("margin", 46))
+        pw, ph = 250, 62
+        x0, y1 = margin, H - margin
+        y0, x1 = y1 - ph, x0 + pw
+        d.rounded_rectangle([x0, y0, x1, y1], radius=ph // 2, fill=SCRIM)
+
+        # Battery glyph: outline + nub, filled proportionally to charge. 4.2V
+        # full, 3.2V empty — the usable span, not 0V, which would show a third
+        # of a bar on a pack that is actually flat.
+        bx, by = x0 + 22, y0 + 19
+        bw, bh = 46, 24
+        d.rounded_rectangle([bx, by, bx + bw, by + bh], radius=4, outline=BLACK, width=3)
+        d.rectangle([bx + bw + 3, by + 7, bx + bw + 8, by + bh - 7], fill=BLACK)
+        frac = max(0.0, min(1.0, (volts - 3.2) / (4.2 - 3.2)))
+        if frac > 0.02:
+            d.rectangle([bx + 5, by + 5, bx + 5 + (bw - 10) * frac, by + bh - 5], fill=RED)
+
+        d.text((bx + bw + 22, y0 + 14), f"{volts:.2f}V", font=fnt(26), fill=RED)
+        d.text((bx + bw + 22, y0 + 40), "charge me", font=fnt(15, False), fill=BLACK)
+        return img
 
     def _add_forecast_card(self, image: Image.Image, forecast, config: dict) -> Image.Image:
         """

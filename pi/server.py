@@ -5,6 +5,8 @@ Provides /image, /hash, and /metadata endpoints.
 
 import json
 import logging
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from threading import Thread
@@ -15,6 +17,63 @@ from flask import Flask, request, send_file, jsonify, Response
 from config import get_config
 
 logger = logging.getLogger(__name__)
+
+
+# The ESP reports its battery by printing one line into the serial log it
+# already POSTs here — no extra endpoint, no extra request, and the firmware
+# change is a single printf. Matches e.g. "BATTERY: 4.05V" (case-insensitive,
+# 'V' optional).
+_BATTERY_RE = re.compile(r"BATTERY:\s*([0-9]+(?:\.[0-9]+)?)\s*V?", re.IGNORECASE)
+
+# A 1S LiPo outside this range is a misread, not a reading — a floating ADC or
+# a firmware that prints raw counts would otherwise poison the history.
+_BATTERY_MIN, _BATTERY_MAX = 2.0, 4.6
+
+
+def _record_battery(data_dir: Path, body: str) -> Optional[float]:
+    """
+    Pull the last battery voltage out of an ESP log dump and persist it.
+
+    Kept in its own small JSON rather than parsed back out of esp.log, because
+    esp.log is append-only and unbounded — re-scanning it every render would
+    get slower forever. History is capped for the same reason: this SD card has
+    a track record of failing on writes, so bounded files matter.
+    """
+    matches = _BATTERY_RE.findall(body or "")
+    if not matches:
+        return None
+    try:
+        volts = float(matches[-1])
+    except ValueError:
+        return None
+    if not (_BATTERY_MIN <= volts <= _BATTERY_MAX):
+        logger.warning(f"Ignoring out-of-range battery reading: {volts}V")
+        return None
+
+    path = data_dir / "battery.json"
+    state = {"history": []}
+    if path.exists():
+        try:
+            with open(path) as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass  # corrupt file: start fresh rather than lose the new reading
+
+    now = datetime.utcnow().isoformat() + "Z"
+    history = state.get("history") or []
+    history.append([now, volts])
+    state = {"volts": volts, "time": now, "history": history[-200:]}
+
+    tmp = path.with_suffix(".json.tmp")
+    try:
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp, path)     # atomic: a render mid-write never sees half a file
+    except OSError as e:
+        logger.error(f"Could not persist battery state: {e}")
+        return None
+    logger.info(f"ESP battery: {volts:.2f}V")
+    return volts
 
 
 def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None) -> Flask:
@@ -184,6 +243,8 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
             f.write(body)
             if not body.endswith("\n"):
                 f.write("\n")
+
+        _record_battery(data_dir, body)
         return Response("", status=204)
 
     @app.route("/sleep")
