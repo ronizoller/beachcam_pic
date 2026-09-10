@@ -51,7 +51,7 @@
 #define EPD_SCK_PIN     18   // [SCK]
 #define EPD_MOSI_PIN    23   // [MOSI]
 #define EPD_CS_M_PIN    16   // [D11]
-#define EPD_CS_S_PIN    17   // [D10]
+#define EPD_CS_S_PIN    14   // [D6]
 #define EPD_RST_PIN     26   // [D3]
 #define EPD_DC_PIN      25   // [D2]
 #define EPD_BUSY_PIN    34   // [A2] input-only pin — fine, BUSY is read-only
