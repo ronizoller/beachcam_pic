@@ -344,6 +344,43 @@ class DayForecast:
                     best = (avg, seg[0].hour, seg[-1].hour + 1)
         return best
 
+    def condition_bucket(self, best: Optional[Tuple[float, int, int]]) -> str:
+        """
+        Classify the day so the card can say something specific about it.
+
+        The point is that the message reads as though the frame noticed what
+        KIND of bad day it is — "windy and flat" lands differently from "mirror
+        flat" — rather than firing a random quip. Buckets are ordered most
+        specific first; `poor` and `ok` are the catch-alls.
+        """
+        lo, hi = int(self.sunrise[:2]), int(self.sunset[:2])
+        day = [h for h in self.hours if lo <= h.hour < hi] or self.hours
+        if not day:
+            return "poor"
+        max_wave = max(h.wave for h in day)
+        mean_wind = sum(h.wind for h in day) / len(day)
+
+        if best is not None and best[0] >= FLAT_RATING:
+            avg = best[0]
+            if avg >= 7:
+                return "epic"
+            if avg >= 5:
+                return "good"
+            return "ok"
+
+        # Bad day — say WHY it is bad.
+        if max_wave < 0.6:
+            if mean_wind >= 20:
+                return "flat_windy"
+            if mean_wind < 10:
+                return "flat_glassy"
+            return "flat"
+        if max_wave >= 0.9 and mean_wind >= 20:
+            return "blown"
+        if mean_wind < 12:
+            return "small_clean"
+        return "poor"
+
     def window_conditions(self, a: int, b: int) -> dict:
         """
         Mean wave/period/wind ACROSS the window, not the window's best hour.

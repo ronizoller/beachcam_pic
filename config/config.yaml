@@ -174,6 +174,107 @@ battery:
   icon_width: 60
   icon_height: 30
 
+# ========== FORECAST CARD MESSAGES ==========
+# One line per day on the forecast card, picked by a hash of the DATE so it is
+# stable all evening — the card re-renders every ~2 min inside the sunset
+# window, and a per-render random pick would visibly flicker.
+#
+# Buckets are chosen by surf_data.DayForecast.condition_bucket(), so the line
+# responds to WHY the day is bad rather than being random.
+#
+# KEEP LINES SHORT. Headlines are hard-capped at 28 characters and good-day
+# lines at 26; anything longer is skipped at render time with a warning, so a
+# too-long addition degrades to the next candidate instead of overflowing the
+# card. Auto-fit drops the headline 32 -> 24pt as needed.
+messages:
+  headline_max_chars: 28
+  aside_max_chars: 26
+
+  # --- bad days: the headline replaces the old fixed "NOT WORTH IT" ---
+  flat_glassy:
+    - "Mirror flat. Bring a book."
+    - "Glassy. And ankle high."
+    - "Lake Tel Aviv today."
+    - "Flat, but beautifully so."
+    - "Perfect day for a swim."
+    - "The sea is having a lie-in."
+    - "Not a ripple in sight."
+    - "Glass. Just no waves in it."
+  flat_windy:
+    - "Windy and flat. Impressive."
+    - "All chop, no reward."
+    - "The wind got all of it."
+    - "All wind, no waves."
+    - "Kite weather, not surf."
+    - "Blowing hard. Doing nothing."
+    - "Chop without the swell."
+    - "Windy. Still flat. Rude."
+  flat:
+    - "The sea is closed today."
+    - "Flat as a pancake."
+    - "Nothing doing out there."
+    - "Ankle slappers at best."
+    - "Even the seagulls are bored."
+    - "Zero. Absolutely zero."
+    - "Sea's taking the day off."
+  small_clean:
+    - "Clean. Just very small."
+    - "Glassy little nothings."
+    - "Clean, calm, and pointless."
+    - "Barely worth the wax."
+    - "Longboard, if you squint."
+    - "Tiny but tidy."
+    - "Small print conditions."
+    - "Knee high and honest."
+  blown:
+    - "Big. Also a washing machine."
+    - "Lumpy and cross."
+    - "Wind wrecked it."
+    - "Looks angry out there."
+    - "Size yes. Shape no."
+    - "Messy out there."
+    - "All chop, no corduroy."
+    - "Victory at sea."
+  poor:
+    - "Better days ahead."
+    - "Nothing to see here."
+    - "Sit this one out."
+    - "The forecast apologises."
+    - "Not your day."
+    - "Save your wax."
+    - "One for the couch."
+    - "Maybe tomorrow."
+
+  # --- good days: a short aside UNDER the window readout, which stays the
+  #     headline because the time is the thing you actually need ---
+  ok:
+    - "Worth a look."
+    - "Might be worth it."
+    - "Nothing special, but fine."
+    - "You could do worse."
+    - "Wax the longboard."
+    - "Could be fun."
+    - "Decent enough."
+    - "Take the longboard."
+  good:
+    - "Set the alarm."
+    - "Proper surf, that."
+    - "Get up for this one."
+    - "Looking good out there."
+    - "Make the effort."
+    - "That'll do nicely."
+    - "Go on then."
+    - "Worth the early start."
+  epic:
+    - "Call in sick."
+    - "Clear the morning."
+    - "Best of the week."
+    - "Do not sleep in."
+    - "Everything lines up."
+    - "This is the one."
+    - "Drop everything."
+    - "Don't miss this."
+
 # ========== NEXT-DAY FORECAST CARD ==========
 # Drawn bottom-right on the SUNSET frame only — the image the panel holds all
 # night, so it is the one worth spending on tomorrow's plan. Daytime frames and
@@ -189,7 +290,9 @@ forecast:
   # Shrunk from 680x388 (-39% area) once the plot stopped needing room for a
   # three-colour status ramp — see the contrast note in _add_forecast_card.
   width: 540
-  height: 300
+  # 330 not 300: on a bad day the message headline takes its own full-width
+  # line, since the right column is only ~330px and most lines are wider at 32pt.
+  height: 345
   margin: 46
 
 # ========== SURF PREFERENCES ==========

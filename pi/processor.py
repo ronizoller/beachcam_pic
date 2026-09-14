@@ -5,7 +5,8 @@ Pipeline: resize → overlay → PIL dithering (6-color)
 """
 
 import logging
-from datetime import datetime
+import random
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional, Tuple, List
 
@@ -447,6 +448,52 @@ class Processor:
         d.rounded_rectangle(nub, radius=2, fill=BLACK)
         return img
 
+    def _pick_message(self, bucket: str, kind: str, width_px: int,
+                      font, draw) -> Optional[str]:
+        """
+        One line for `bucket`, chosen by a hash of TODAY'S DATE.
+
+        Date-seeded, not random: the card re-renders every ~2 minutes through
+        the sunset window, so a per-render random pick would visibly change the
+        text every couple of minutes and read as a glitch. Same day, same line.
+
+        Lines too wide for `width_px` are dropped rather than clipped, so a
+        long addition to config degrades to the next candidate instead of
+        running off the card.
+        """
+        pools = self.config.get("messages", default={}) or {}
+        pool = pools.get(bucket) or pools.get("poor") or []
+        if not pool:
+            return None
+        cap = int(pools.get("headline_max_chars" if kind == "headline"
+                            else "aside_max_chars", 28))
+        fits = []
+        for line in pool:
+            if len(line) > cap:
+                logger.warning(f"Message over {cap} chars, skipped: {line!r}")
+                continue
+            if draw.textbbox((0, 0), line, font=font)[2] > width_px:
+                logger.warning(f"Message too wide for card, skipped: {line!r}")
+                continue
+            fits.append(line)
+        if not fits:
+            return None
+        # Walk a SHUFFLED PERMUTATION of the pool rather than hashing the date
+        # straight to an index. A plain hash-mod collides: over ten days an
+        # 8-line pool repeated one line three times. This way every line in the
+        # bucket is used once before any repeats, and the shuffle is reseeded
+        # each cycle so the order itself changes too.
+        # Walk a FIXED shuffled permutation, indexed by the day number. A plain
+        # hash-of-the-date collides — over ten days an 8-line pool repeated one
+        # line three times. Reshuffling per cycle was no better: the cycle
+        # boundary lands mid-window, so a fresh shuffle could repeat a line used
+        # days earlier. A fixed permutation gives the clean guarantee: exactly
+        # len(pool) days between any repeat, with no boundary effects.
+        n = len(fits)
+        order = list(range(n))
+        random.Random(bucket).shuffle(order)
+        return fits[order[date.today().toordinal() % n]]
+
     def _add_forecast_card(self, image: Image.Image, forecast, config: dict) -> Image.Image:
         """
         Tomorrow's surf forecast, bottom-right, drawn BEFORE dithering.
@@ -490,7 +537,7 @@ class Processor:
 
         margin = int(config.get("margin", 46))
         cw = int(config.get("width", 540))
-        ch = int(config.get("height", 300))
+        ch = int(config.get("height", 345))
         x1, y1 = W - margin, H - margin
         x0, y0 = x1 - cw, y1 - ch
         d.rounded_rectangle([x0, y0, x1, y1], radius=22, fill=SCRIM)
@@ -508,24 +555,39 @@ class Processor:
         d.text((x0 + 26, y0 + 18), "TOMORROW", font=fnt(19), fill=BLACK)
         d.text((x0 + 26, y0 + 40), label, font=fnt(26), fill=BLACK)
 
+        bucket = forecast.condition_bucket(best)
+
         if flat:
             win_a = win_b = None
-            d.text((x1 - 26, y0 + 24), "NOT WORTH IT", font=fnt(32), fill=RED, anchor="ra")
-            d.text((x1 - 26, y0 + 64),
+            # The headline gets the FULL card width on its own line — the right
+            # column is only ~330px and two thirds of the pool is wider than
+            # that at 32pt. Nothing else competes for the space on a flat day.
+            head_f = fnt(32)
+            msg = self._pick_message(bucket, "headline", cw - 52, head_f, d)
+            d.text((x0 + 26, y0 + 78), msg or "NOT WORTH IT", font=head_f, fill=RED)
+            # Sub-line goes top-RIGHT, where "NOT WORTH IT" used to sit. Below
+            # the headline it collided with the plot's "10" axis label.
+            d.text((x1 - 26, y0 + 44),
                    f"flat · max {max(h.wave for h in rows):.1f}m",
                    font=fnt(18, False), fill=BLACK, anchor="ra")
         else:
             _, win_a, win_b = best
             c = forecast.window_conditions(win_a, win_b)
-            d.text((x1 - 26, y0 + 14), f"{win_a:02d}:00", font=fnt(52), fill=GREEN, anchor="ra")
+            d.text((x1 - 26, y0 + 10), f"{win_a:02d}:00", font=fnt(52), fill=GREEN, anchor="ra")
             d.text((x1 - 26, y0 + 72), f"through {win_b:02d}:00",
                    font=fnt(19, False), fill=BLACK, anchor="ra")
-            d.text((x1 - 26, y0 + 94),
+            d.text((x1 - 26, y0 + 90),
                    f"{c['wave']:.1f}m @ {c['period']:.0f}s · {c['wind']:.0f}km/h",
                    font=fnt(18, False), fill=BLACK, anchor="ra")
+            # On a good day the TIME stays the headline — it is the thing you
+            # actually need — so the message is a small aside underneath.
+            aside_f = fnt(18)
+            msg = self._pick_message(bucket, "aside", 300, aside_f, d)
+            if msg:
+                d.text((x1 - 26, y0 + 112), msg, font=aside_f, fill=GREEN, anchor="ra")
 
         # --- plot ---
-        px0, py0 = x0 + 56, y0 + 128
+        px0, py0 = x0 + 56, y0 + 150
         px1, py1 = x1 - 46, y1 - 64
         for v in (0, 5, 10):
             y = py1 - (py1 - py0) * v / 10
