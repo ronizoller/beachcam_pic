@@ -418,9 +418,12 @@ class Processor:
         margin = int(config.get("margin", 46))
         bw = int(config.get("icon_width", 60))
         bh = int(config.get("icon_height", 30))
-        stroke = 4
-        nub_w, nub_h = 7, bh // 3
-        radius = 6
+        # Strokes scale with the icon (tuned at 30px tall) so a bigger icon
+        # does not end up a large shape with a hairline outline.
+        k = bh / 30
+        stroke = max(4, round(4 * k))
+        nub_w, nub_h = max(7, round(7 * k)), bh // 3
+        radius = max(6, round(6 * k))
 
         x1 = W - margin - nub_w      # leave room for the nub inside the margin
         x0 = x1 - bw
@@ -430,22 +433,23 @@ class Processor:
         nub = [x1, y0 + (bh - nub_h) // 2, x1 + nub_w, y0 + (bh + nub_h) // 2]
 
         # White keyline first, drawn slightly larger so it reads as a halo.
-        d.rounded_rectangle([x0 - 2, y0 - 2, x1 + 2, y1 + 2],
-                            radius=radius + 2, outline=WHITE, width=stroke + 2)
-        d.rounded_rectangle([nub[0], nub[1] - 2, nub[2] + 2, nub[3] + 2],
-                            radius=2, outline=WHITE, width=3)
+        kl = max(2, round(2 * k))
+        d.rounded_rectangle([x0 - kl, y0 - kl, x1 + kl, y1 + kl],
+                            radius=radius + kl, outline=WHITE, width=stroke + kl)
+        d.rounded_rectangle([nub[0], nub[1] - kl, nub[2] + kl, nub[3] + kl],
+                            radius=kl, outline=WHITE, width=kl + 1)
 
         # Charge remaining, over the USABLE span (3.2V empty, 4.2V full) rather
         # than from 0V — a genuinely flat pack must not look a third full.
         frac = max(0.0, min(1.0, (volts - 3.2) / (4.2 - 3.2)))
-        ix0, iy0 = x0 + stroke + 2, y0 + stroke + 2
-        ix1, iy1 = x1 - stroke - 2, y1 - stroke - 2
+        ix0, iy0 = x0 + stroke + kl, y0 + stroke + kl
+        ix1, iy1 = x1 - stroke - kl, y1 - stroke - kl
         if frac > 0.02:
             d.rectangle([ix0, iy0, ix0 + (ix1 - ix0) * frac, iy1], fill=RED)
 
         # Black outline last so it stays crisp over both keyline and fill.
         d.rounded_rectangle([x0, y0, x1, y1], radius=radius, outline=BLACK, width=stroke)
-        d.rounded_rectangle(nub, radius=2, fill=BLACK)
+        d.rounded_rectangle(nub, radius=kl, fill=BLACK)
         return img
 
     def _pick_message(self, bucket: str, kind: str, width_px: int,

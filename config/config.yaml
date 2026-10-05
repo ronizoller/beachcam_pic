@@ -168,11 +168,14 @@ battery:
   # so without an age limit the last gasp before death would pin the warning on
   # forever — including after you have charged it.
   max_age_hours: 6
-  margin: 46
+  # 110 not 46: at 46px (~1.2 cm) the icon sat close enough to the edge to be
+  # missed on the glass. 110px is ~2.8 cm in from the top and right.
+  margin: 110
   # Bare icon, top-right: no scrim, no text, transparent body. A thin white
   # keyline outside the black outline keeps it visible on a dark photo.
-  icon_width: 60
-  icon_height: 30
+  # 120x60 (was 60x30, which was too small to notice on the wall).
+  icon_width: 120
+  icon_height: 60
 
 # ========== FORECAST CARD MESSAGES ==========
 # One line per day on the forecast card, picked by a hash of the DATE so it is
