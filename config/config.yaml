@@ -173,9 +173,10 @@ battery:
   margin: 110
   # Bare icon, top-right: no scrim, no text, transparent body. A thin white
   # keyline outside the black outline keeps it visible on a dark photo.
-  # 120x60 (was 60x30, which was too small to notice on the wall).
-  icon_width: 120
-  icon_height: 60
+  # 60x30. Briefly 120x60 (too large on the wall); the size was never the
+  # problem, the 46px margin was. The top-right corner is pinned by `margin`.
+  icon_width: 60
+  icon_height: 30
 
 # ========== FORECAST CARD MESSAGES ==========
 # One line per day on the forecast card, picked by a hash of the DATE so it is
