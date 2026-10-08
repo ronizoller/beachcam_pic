@@ -360,6 +360,9 @@ guest_beaches:
       # 4:3 box on the right: drops the timestamp (top-left, x<250) and most
       # of the surf hut, keeps the beach and sea.
       crop_box: [252, 0, 960, 531]
+      # Level the horizon (positive = counter-clockwise). It rises to the
+      # right; -2.5 also brings the masts and flagpoles upright.
+      rotation: -2.5
       timezone: "Africa/Cairo"
       scoring_profile: "beach"
       location:
@@ -376,6 +379,9 @@ guest_beaches:
       # 4:3 box on the sea and kite beach: drops the date strip on top, the
       # deck and close-up people at the bottom, and the awning on the right.
       crop_box: [420, 120, 1420, 870]
+      # Level the horizon (positive = counter-clockwise). Fisheye lens, so
+      # this levels the arc's overall slope; the curve itself stays.
+      rotation: -1.1
       timezone: "Asia/Jerusalem"
       scoring_profile: "beach"
       location:
@@ -392,6 +398,9 @@ guest_beaches:
       # 4:3 box clear of every overlay: logo (top-left), weather pills
       # (top-right), event card + QR and date pill (bottom-left, x<405).
       crop_box: [420, 115, 1227, 720]
+      # Level the horizon (positive = counter-clockwise). Rotation runs after
+      # the crop, so the overlays stay outside the frame.
+      rotation: 1.0
       timezone: "Asia/Bangkok"
       scoring_profile: "beach"
       location:
