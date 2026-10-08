@@ -431,8 +431,15 @@ guest_beaches:
       # HLS alternative: https://live.iliamare.gr/memfs/9fb933aa-5d49-4b6c-a004-fe8f3fc9f282.m3u8
       url: "https://live.iliamare.gr/memfs/9fb933aa-5d49-4b6c-a004-fe8f3fc9f282.jpg"
       type: "snapshot"
-      crop_box: [0, 130, 2560, 1440] # Crop top timestamp + ILIA MARE HOTEL text
-      rotation: 5.0 
+      # Fisheye lens: the horizon was an arc, which no rotation can level.
+      # lens_k1 straightens it first (fitted on 7 horizon points read by eye:
+      # rms 23 px -> 2 px from a straight line), then rotation levels the
+      # straightened line (6.5 deg; was 5.0, which only levelled the arc's
+      # chord). crop_box is in undistorted coordinates: the correction lifts
+      # the ILIA MARE HOTEL text to the top 60 px, so 80 clears it.
+      lens_k1: 0.355
+      crop_box: [0, 80, 2560, 1440]
+      rotation: 6.5
       timezone: "Europe/Athens"
       scoring_profile: "beach"
       location:

@@ -40,6 +40,48 @@ from server import Server
 from surf_data import (ForecastFetcher, SurfConditions, SurfDataFetcher,
                        SurfPreferences)
 
+def undistort_radial(img, k: float, grid: int = 16):
+    """
+    Undo barrel (fisheye) distortion with a one-term radial model.
+
+    An undistorted point at normalised radius r_u came from distorted radius
+    r_d where r_u = r_d * (1 + k * r_d^2), radii measured from the image
+    centre in units of the half-diagonal. k is fitted per camera so that the
+    horizon comes out straight; rotation alone cannot level a curve.
+
+    Done as a PIL MESH transform (a grid of quads, warped in C), not a
+    per-pixel numpy remap, so it stays cheap on a Pi Zero. Output has the
+    input's size; since r_d < r_u everywhere, every output pixel samples
+    inside the source and there are no empty corners — the cost is that
+    the far edges of the original are pushed out of frame.
+    """
+    from PIL import Image
+
+    w, h = img.size
+    cx, cy, R = w / 2, h / 2, math.hypot(w / 2, h / 2)
+
+    def source(x, y):
+        dx, dy = (x - cx) / R, (y - cy) / R
+        r_u = math.hypot(dx, dy)
+        if r_u == 0:
+            return x, y
+        r = r_u
+        for _ in range(8):  # Newton: solve r + k r^3 = r_u
+            r -= (r + k * r ** 3 - r_u) / (1 + 3 * k * r ** 2)
+        s = r / r_u
+        return cx + dx * s * R, cy + dy * s * R
+
+    xs = [round(i * w / grid) for i in range(grid + 1)]
+    ys = [round(j * h / grid) for j in range(grid + 1)]
+    mesh = []
+    for j in range(grid):
+        for i in range(grid):
+            x0, x1, y0, y1 = xs[i], xs[i + 1], ys[j], ys[j + 1]
+            quad = (*source(x0, y0), *source(x0, y1), *source(x1, y1), *source(x1, y0))
+            mesh.append(((x0, y0, x1, y1), quad))
+    return img.transform((w, h), Image.MESH, mesh, resample=Image.BILINEAR)
+
+
 def solar_elevation(lat: float, lon: float, when_utc: datetime) -> float:
     """
     Sun elevation in degrees at (lat, lon) for a naive UTC datetime.
@@ -248,6 +290,11 @@ class BeachCamService:
         raw_img = Image.open(fetch_result.image_path)
 
         if is_guest:
+            # Fisheye cams: straighten the lens bend first, on the full frame
+            # (the distortion is centred on the original image), so crop_box
+            # is in undistorted coordinates.
+            if camera.get("lens_k1"):
+                raw_img = undistort_radial(raw_img.convert("RGB"), float(camera["lens_k1"]))
             # Use guest camera's crop_box
             crop_box = camera.get("crop_box")
             cropped_img = raw_img.crop(tuple(crop_box)) if crop_box else raw_img
