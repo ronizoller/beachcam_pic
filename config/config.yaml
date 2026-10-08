@@ -339,15 +339,36 @@ guest_beaches:
         lon: -9.3394
         name: "Baleal"
     - name: "Dahab"
-      url: "https://webcam.harry-nass.com/dahab-live.jpg"
+      # 5 Squares windsurf center (go-dahab.ru), 960x540, new frame every 3-5 min.
+      # Replaced webcam.harry-nass.com/dahab-live.jpg, frozen on 2026-06-03
+      # (the server kept serving the same image for 4 months).
+      url: "https://go-dahab.ru/webcam6/image4.jpg"
       type: "snapshot"
-      crop_box: [0, 0, 2688, 1480]  # Remove watermark at bottom
+      # 4:3 box on the right: drops the timestamp (top-left, x<250) and most
+      # of the surf hut, keeps the beach and sea.
+      crop_box: [252, 0, 960, 531]
       timezone: "Africa/Cairo"
       scoring_profile: "beach"
       location:
         lat: 28.5007
         lon: 34.5133
         name: "Dahab"
+    - name: "Eilat"
+      # Surf Center kite beach (ipcamlive), 1920x1080, near real-time.
+      # snapshot.php 302-redirects to the current JPEG; requests follows it.
+      # Windy mirrors it (id 1615385889) but ~10+ min stale. Only produces
+      # frames while the camera is streaming, so expect occasional outages.
+      url: "https://ipcamlive.com/player/snapshot.php?alias=surfcenterkite"
+      type: "snapshot"
+      # 4:3 box on the sea and kite beach: drops the date strip on top, the
+      # deck and close-up people at the bottom, and the awning on the right.
+      crop_box: [420, 120, 1420, 870]
+      timezone: "Asia/Jerusalem"
+      scoring_profile: "beach"
+      location:
+        lat: 29.5125
+        lon: 34.9252
+        name: "Eilat"
     - name: "Ilia Beach, Evia"
       # JPEG snapshot from Ilia Mare Hotel cam (2560x1440)
       # Cache-busting param needed: Cloudflare caches aggressively (max-age=14400)
