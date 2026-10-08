@@ -202,6 +202,10 @@ class Fetcher:
           url  – YouTube video URL, e.g. https://www.youtube.com/watch?v=XXXX
           video_id – (optional) if set, used for the thumbnail fallback
                      without needing to parse the URL.
+          channel_id – (optional) resolve the channel's CURRENT live video on
+                     every fetch. For cams that restart their stream often
+                     (Khao Lak's Valhalla cam had 6 video ids in one week),
+                     where a stored id goes dead within days.
         """
         import re as _re
         import subprocess
@@ -209,6 +213,15 @@ class Fetcher:
         camera_name = camera.get("name", "Unknown")
         url = camera.get("url")
         video_id = camera.get("video_id")
+
+        if camera.get("channel_id"):
+            video_id = self._resolve_youtube_live_id(camera["channel_id"])
+            if not video_id:
+                return FetchResult(
+                    success=False, camera_name=camera_name,
+                    error=f"Channel {camera['channel_id']} is not live",
+                )
+            url = f"https://www.youtube.com/watch?v={video_id}"
 
         if not url and not video_id:
             return FetchResult(success=False, error=f"No URL/video_id for camera {camera_name}")
@@ -273,6 +286,37 @@ class Fetcher:
             camera_name=camera_name,
             error="Could not extract HLS or thumbnail from YouTube live stream",
         )
+
+    @staticmethod
+    def _resolve_youtube_live_id(channel_id: str) -> Optional[str]:
+        """
+        Current live video id of a channel, or None if it is not live.
+
+        youtube.com/channel/<id>/live serves the live video's watch page, and
+        its <link rel="canonical"> carries the video id in plain HTML (no JS).
+        When the channel is offline the canonical points at the channel
+        itself, so there is no v= to find.
+        """
+        import re as _re
+
+        try:
+            resp = requests.get(
+                f"https://www.youtube.com/channel/{channel_id}/live",
+                timeout=15,
+                headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9"},
+            )
+            resp.raise_for_status()
+            m = _re.search(
+                r'<link rel="canonical" href="https://www\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})"',
+                resp.text,
+            )
+            if m:
+                logger.info(f"YouTube channel {channel_id} is live as {m.group(1)}")
+                return m.group(1)
+            logger.warning(f"YouTube channel {channel_id} has no live video")
+        except Exception as e:
+            logger.warning(f"Failed to resolve live video for channel {channel_id}: {e}")
+        return None
 
     @staticmethod
     def _extract_youtube_hls(video_url: str) -> Optional[str]:

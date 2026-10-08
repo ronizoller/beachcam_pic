@@ -369,6 +369,22 @@ guest_beaches:
         lat: 29.5125
         lon: 34.9252
         name: "Eilat"
+    - name: "Khao Lak"
+      # Valhalla Teahouse cam over Sunset Beach (Khao Lak-Lam Ru NP), YouTube
+      # live. The video id rotates every day or two, so it is resolved from
+      # the channel on each fetch. The Pi uses YouTube's live thumbnail
+      # (1280x720, refreshed ~5 min), which for this channel is a real frame.
+      type: "youtube_live"
+      channel_id: "UCUEVXcP7IpVfBojO1iIkFww"
+      # 4:3 box clear of every overlay: logo (top-left), weather pills
+      # (top-right), event card + QR and date pill (bottom-left, x<405).
+      crop_box: [420, 115, 1227, 720]
+      timezone: "Asia/Bangkok"
+      scoring_profile: "beach"
+      location:
+        lat: 8.6417
+        lon: 98.2453
+        name: "Khao Lak"
     - name: "Ilia Beach, Evia"
       # JPEG snapshot from Ilia Mare Hotel cam (2560x1440)
       # Cache-busting param needed: Cloudflare caches aggressively (max-age=14400)
