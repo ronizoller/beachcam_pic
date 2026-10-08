@@ -255,7 +255,7 @@ class Fetcher:
                         str(raw_path),
                     ],
                     capture_output=True,
-                    timeout=30,
+                    timeout=60,  # Koh Phangan measured 32.5 s end to end on the Pi Zero
                 )
                 if result.returncode == 0 and raw_path.exists():
                     logger.info(f"YouTube HLS frame saved: {raw_path}")
