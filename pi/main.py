@@ -36,6 +36,7 @@ from cropper import Cropper
 from filter import FrameFilter
 from processor import Processor
 from scorer import score_frame
+import guest_report
 from server import Server
 from surf_data import (ForecastFetcher, SurfConditions, SurfDataFetcher,
                        SurfPreferences)
@@ -148,6 +149,7 @@ class BeachCamService:
         self._guest_today: Optional[dict] = None  # {"date": str, "trigger_minutes": int, "camera": dict}
         self._guest_used_today: Optional[str] = None  # date string when guest was shown
         self._guest_active: bool = False  # True while guest is being served (until ESP32 pulls)
+        self._guest_run: Optional[guest_report.GuestRun] = None  # stats for the report
         self._cycle_count: int = 0
 
         # Setup paths
@@ -231,9 +233,11 @@ class BeachCamService:
                 self._guest_active = False
                 self._guest_used_today = datetime.now().strftime("%Y-%m-%d")
                 self._save_guest_state()
+                self._finish_guest_run()
                 logger.info("Guest beach served to ESP32, back to main camera")
             elif self._is_guest_cycle():
                 self._guest_active = True
+                self._guest_run = guest_report.GuestRun(self._guest_today["camera"]["name"])
                 self._save_guest_state()
                 logger.info(f"Guest beach starting: {self._guest_today['camera']['name']}")
 
@@ -247,6 +251,7 @@ class BeachCamService:
             self._guest_active = False
             self._guest_used_today = datetime.now().strftime("%Y-%m-%d")
             self._save_guest_state()
+            self._finish_guest_run()
             logger.info(
                 "Golden hour started — retiring active guest so the day ends on the sunset"
             )
@@ -282,6 +287,8 @@ class BeachCamService:
 
         if not fetch_result.success:
             logger.error(f"Fetch failed: {fetch_result.error}")
+            if is_guest and self._guest_run:
+                self._guest_run.fail(fetch_result.error)
             return False
 
         logger.info(f"Fetched from: {fetch_result.camera_name}")
@@ -367,6 +374,8 @@ class BeachCamService:
             max_grey = float(guest_config.get("max_grey_fraction", 0.92))
             grey = score_details.get("grey_fraction", 0.0)
             rejected = grey > max_grey
+            if self._guest_run:
+                self._guest_run.frame(cropped_img, usable=not rejected, score=score)
             self._archive_guest_frame(
                 cropped_img, score, score_details, camera["name"],
                 rejected=f"grey {grey:.0%} > {max_grey:.0%}" if rejected else None,
@@ -781,6 +790,12 @@ class BeachCamService:
         except Exception as e:
             logger.error(f"Could not build forecast: {e}")
             return None
+
+    def _finish_guest_run(self):
+        """Fold the guest run that just ended into data/guest_report.json."""
+        if self._guest_run:
+            guest_report.record(self.data_dir / "guest_report.json", self._guest_run)
+            self._guest_run = None
 
     def _archive_guest_frame(self, image, score: float, details: dict,
                              camera: str, rejected: Optional[str] = None):

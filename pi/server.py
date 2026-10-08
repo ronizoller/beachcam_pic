@@ -230,6 +230,19 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
             return jsonify(get_guest_info())
         return jsonify({"status": "no guest info available"})
 
+    @app.route("/guests")
+    def guests_page():
+        """How each guest camera did the times it was shown (see guest_report)."""
+        import guest_report
+        names = [c["name"] for c in (config.get("guest_beaches", default={}) or {}).get("cameras", [])]
+        report = guest_report.load(data_dir / "guest_report.json")
+        return Response(guest_report.render_html(report, names), mimetype="text/html")
+
+    @app.route("/guests.json")
+    def guests_json():
+        import guest_report
+        return jsonify(guest_report.load(data_dir / "guest_report.json"))
+
     @app.route("/log", methods=["POST"])
     def post_log():
         """Accept a serial log dump from the ESP32 and append to esp.log.
