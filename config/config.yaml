@@ -398,6 +398,23 @@ guest_beaches:
         lat: 8.6417
         lon: 98.2453
         name: "Khao Lak"
+    - name: "Koh Phangan"
+      # House of Sanskara (Teleport.camera), YouTube live, Haad Rin area.
+      # Its live thumbnail is a fixed promo graphic, so this cam needs the
+      # player-API route (youtube_player_api) to get a real frame; fragile,
+      # see Fetcher._youtube_player_hls.
+      type: "youtube_live"
+      video_id: "MW3fisTCXRQ"
+      youtube_player_api: true
+      # 4:3 box between the palms; drops the cafe tables and the clock at
+      # the bottom (coordinates at the 720p variant the fetcher picks).
+      crop_box: [140, 0, 867, 545]
+      timezone: "Asia/Bangkok"
+      scoring_profile: "beach"
+      location:
+        lat: 9.6700
+        lon: 100.0700
+        name: "Koh Phangan"
     - name: "Ilia Beach, Evia"
       # JPEG snapshot from Ilia Mare Hotel cam (2560x1440)
       # Cache-busting param needed: Cloudflare caches aggressively (max-age=14400)

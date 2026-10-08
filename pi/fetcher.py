@@ -241,6 +241,8 @@ class Fetcher:
 
         # ---- Phase 1: try HLS manifest extraction ----
         hls_url = self._extract_youtube_hls(url or f"https://www.youtube.com/watch?v={video_id}")
+        if not hls_url and video_id and camera.get("youtube_player_api"):
+            hls_url = self._youtube_player_hls(video_id)
         if hls_url:
             try:
                 result = subprocess.run(
@@ -317,6 +319,88 @@ class Fetcher:
         except Exception as e:
             logger.warning(f"Failed to resolve live video for channel {channel_id}: {e}")
         return None
+
+    @staticmethod
+    def _youtube_player_hls(video_id: str, height: int = 720) -> Optional[str]:
+        """
+        HLS playlist for a live video via YouTube's own player API.
+
+        The watch page stopped embedding hlsManifestUrl, and for many channels
+        the live thumbnail is a fixed promo graphic, so neither older path
+        yields a real frame. This asks the player endpoint directly while
+        presenting as the visionOS app, the client that still returns
+        streamingData.hlsManifestUrl without a login (yt-dlp uses the same
+        route as of 2026-08). It needs the watch page's VISITOR_DATA, and the
+        returned URL is bound to the requesting IP for ~6 h, so it is fetched
+        fresh on every call.
+
+        Fragile by nature: YouTube can retire this client at any time. Opt-in
+        per camera (youtube_player_api: true), and a failure just returns None.
+
+        Returns the variant playlist closest to `height` (720p keeps ffmpeg's
+        decode cheap on a Pi Zero), or None.
+        """
+        import json as _json
+        import re as _re
+
+        try:
+            page = requests.get(
+                f"https://www.youtube.com/watch?v={video_id}", timeout=15,
+                headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en"},
+            )
+            page.raise_for_status()
+            m = _re.search(r'"VISITOR_DATA":"([^"]+)"', page.text)
+            if not m:
+                logger.warning("YouTube player API: no VISITOR_DATA on watch page")
+                return None
+            visitor = m.group(1)
+
+            body = {
+                "videoId": video_id,
+                "context": {"client": {
+                    "clientName": "VISIONOS", "clientVersion": "1.02",
+                    "deviceMake": "Apple", "deviceModel": "RealityDevice17,1",
+                    "osName": "visionOS", "osVersion": "26.5.23O471",
+                    "hl": "en", "visitorData": visitor,
+                }},
+            }
+            resp = requests.post(
+                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                data=_json.dumps(body), timeout=15,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) "
+                        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+                    ),
+                    "Content-Type": "application/json",
+                    "X-YouTube-Client-Name": "101",
+                    "X-YouTube-Client-Version": "1.02",
+                    "X-Goog-Visitor-Id": visitor,
+                    "Origin": "https://www.youtube.com",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            master = (data.get("streamingData") or {}).get("hlsManifestUrl")
+            if not master:
+                status = (data.get("playabilityStatus") or {}).get("status")
+                logger.warning(f"YouTube player API: no HLS (status {status})")
+                return None
+
+            # Pick the variant nearest the target height from the master list.
+            listing = requests.get(master, timeout=15).text.splitlines()
+            best, best_gap = None, None
+            for i, line in enumerate(listing[:-1]):
+                rm = _re.search(r"RESOLUTION=\d+x(\d+)", line)
+                if rm:
+                    gap = abs(int(rm.group(1)) - height)
+                    if best_gap is None or gap < best_gap:
+                        best, best_gap = listing[i + 1].strip(), gap
+            logger.info(f"YouTube player API: got HLS for {video_id}")
+            return best or master
+        except Exception as e:
+            logger.warning(f"YouTube player API failed for {video_id}: {e}")
+            return None
 
     @staticmethod
     def _extract_youtube_hls(video_url: str) -> Optional[str]:
