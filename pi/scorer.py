@@ -89,6 +89,7 @@ def score_frame(
             "base": round(base, 4),
             "golden_hour": golden_hour,
             "sharpness": round(sharpness(arr), 2),
+            "grey_fraction": round(grey_fraction(arr), 4),
         })
 
     if not golden_hour:
@@ -155,6 +156,35 @@ def _score_composition(arr: np.ndarray, cfg: dict, profile: str) -> float:
         f"buildings={buildings_pct:.0%})"
     )
     return score
+
+
+def grey_fraction(arr: np.ndarray) -> float:
+    """
+    Share of pixels with no usable colour: low saturation and not blue.
+
+    _classify_pixels counts EVERY grey pixel as sea/sky, so on the beach
+    profile a frame of solid fog, static noise or plain black classifies as
+    100% sea/sky and scores 0.42 — a fair score, not a reject. This is the
+    number that tells those frames apart from a real view: 1.0 on fog, noise
+    and black; 0.14-0.35 on most clear frames; up to 0.81 on Baleal's hazy
+    open-sea views (2026-10-08), which are real frames.
+
+    Same thresholds as _classify_pixels, so "grey" here is exactly the set
+    that function lumps into sea/sky without any colour evidence.
+    """
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    max_c = np.maximum(np.maximum(r, g), b)
+    min_c = np.minimum(np.minimum(r, g), b)
+    delta = max_c - min_c
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sat = np.where(max_c > 0, delta / max_c, 0)
+    # Blue hue (180-260) only where blue is the max channel, as in
+    # _classify_pixels; enough to exclude blue sky/sea from "grey".
+    mask_b = (max_c == b) & (delta > 0)
+    hue_b = np.zeros_like(max_c)
+    hue_b[mask_b] = 60 * ((r[mask_b] - g[mask_b]) / delta[mask_b]) + 240
+    is_blue = mask_b & (hue_b >= 180) & (hue_b <= 260) & (sat > 0.1)
+    return float(np.mean((sat < 0.2) & ~is_blue))
 
 
 def sharpness(arr: np.ndarray) -> float:

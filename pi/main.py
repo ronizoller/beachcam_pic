@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import logging
+import math
 import os
 import random
 import signal
@@ -38,6 +39,31 @@ from scorer import score_frame
 from server import Server
 from surf_data import (ForecastFetcher, SurfConditions, SurfDataFetcher,
                        SurfPreferences)
+
+def solar_elevation(lat: float, lon: float, when_utc: datetime) -> float:
+    """
+    Sun elevation in degrees at (lat, lon) for a naive UTC datetime.
+
+    NOAA's low-precision formula (good to ~0.5 deg), so guest daytime can be
+    judged at the guest's own location with no network call and no new
+    dependency. The main camera uses Open-Meteo sun times, but that is one
+    location; guests are anywhere on the planet.
+    """
+    day = when_utc.timetuple().tm_yday
+    hour = when_utc.hour + when_utc.minute / 60 + when_utc.second / 3600
+    g = 2 * math.pi / 365 * (day - 1 + (hour - 12) / 24)
+    decl = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g)
+            - 0.006758 * math.cos(2 * g) + 0.000907 * math.sin(2 * g)
+            - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    eqtime = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                       - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    true_solar_min = hour * 60 + eqtime + 4 * lon
+    ha = math.radians(true_solar_min / 4 - 180)
+    lat_r = math.radians(lat)
+    cos_zenith = (math.sin(lat_r) * math.sin(decl)
+                  + math.cos(lat_r) * math.cos(decl) * math.cos(ha))
+    return math.degrees(math.asin(max(-1.0, min(1.0, cos_zenith))))
+
 
 # Setup logging
 logging.basicConfig(
@@ -280,6 +306,30 @@ class BeachCamService:
             sky_fraction=sky_fraction,
             details=score_details,
         )
+
+        # --- Step 5b: Guest quality gate ---
+        # A guest is the best of the ~6 frames taken before the next ESP pull,
+        # so one clear frame always beats fog. But when ALL of them are fog,
+        # static or darkness, the best of a bad lot used to be shown anyway
+        # (the beach profile scores those 0.42, not 0). Frames with no colour
+        # evidence are now skipped rather than pooled. If none of the guest's
+        # frames is usable, the pool stays empty, the panel keeps the main
+        # image it already has, and the guest ends at the next pull as usual.
+        if is_guest:
+            guest_config = self.config.get("guest_beaches", default={})
+            max_grey = float(guest_config.get("max_grey_fraction", 0.92))
+            grey = score_details.get("grey_fraction", 0.0)
+            rejected = grey > max_grey
+            self._archive_guest_frame(
+                cropped_img, score, score_details, camera["name"],
+                rejected=f"grey {grey:.0%} > {max_grey:.0%}" if rejected else None,
+            )
+            if rejected:
+                logger.warning(
+                    f"Guest {camera['name']} frame is {grey:.0%} grey "
+                    f"(fog/noise/dark) — skipped"
+                )
+                return False
 
         # --- Step 6: Save candidate ---
         candidate_path = self.candidates_dir / f"candidate_{len(self._candidates):03d}.png"
@@ -550,7 +600,23 @@ class BeachCamService:
         return True
 
     def _is_daytime_at(self, camera: dict) -> bool:
-        """Check if it's daytime (7:00-18:00) at the camera's location."""
+        """
+        True when the sun is comfortably up at the camera's location.
+
+        Was a fixed 07:00-18:00 local, which ignores the seasons: Baleal's
+        sunrise is ~07:40 in October, so the first 40 minutes of that window
+        were pre-dawn — a guest picked then got nothing but dark, grainy
+        frames — and in winter the last ~1.5 h fall after sunset. Now judged
+        by sun elevation, so it is right in every season and every timezone.
+        Falls back to the old hours for a camera with no location.
+        """
+        loc = camera.get("location") or {}
+        if "lat" in loc and "lon" in loc:
+            min_elev = float(
+                self.config.get("guest_beaches", default={}).get("min_sun_elevation", 6)
+            )
+            elev = solar_elevation(float(loc["lat"]), float(loc["lon"]), datetime.utcnow())
+            return elev >= min_elev
         hour = self._local_hour_at(camera)
         return 7 <= hour <= 18
 
@@ -668,6 +734,48 @@ class BeachCamService:
         except Exception as e:
             logger.error(f"Could not build forecast: {e}")
             return None
+
+    def _archive_guest_frame(self, image, score: float, details: dict,
+                             camera: str, rejected: Optional[str] = None):
+        """
+        Keep every guest frame with its score, so the fog gate can be tuned on
+        real frames instead of guesses.
+
+        Layout: data/guest_archive/<date>/HHMMSS_<camera>_score0.681.jpg plus a
+        manifest.jsonl line per frame. JPEG, not PNG, and only
+        guest_beaches.archive_days of history: about 6 frames a day, on an SD
+        card that has already corrupted files once.
+
+        Best-effort: never let an archiving failure break the pipeline.
+        """
+        try:
+            now = datetime.now()
+            root = self.data_dir / "guest_archive"
+            out_dir = root / now.strftime("%Y-%m-%d")
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            slug = "".join(ch if ch.isalnum() else "_" for ch in camera).strip("_")
+            fname = f"{now.strftime('%H%M%S')}_{slug}_score{score:.3f}.jpg"
+            image.convert("RGB").save(out_dir / fname, quality=85)
+
+            record = {
+                "time": now.isoformat(timespec="seconds"),
+                "file": fname,
+                "camera": camera,
+                "score": round(float(score), 4),
+                "rejected": rejected,
+            }
+            record.update(details)
+            with open(out_dir / "manifest.jsonl", "a") as f:
+                f.write(json.dumps(record) + "\n")
+
+            keep = int(self.config.get("guest_beaches", default={}).get("archive_days", 14))
+            days = sorted(d for d in root.iterdir() if d.is_dir())
+            import shutil
+            for old_dir in days[:-keep] if keep > 0 else []:
+                shutil.rmtree(old_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Failed to archive guest frame: {e}")
 
     def _archive_golden_frame(
         self,

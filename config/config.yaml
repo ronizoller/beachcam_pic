@@ -326,6 +326,19 @@ guest_beaches:
   # before the golden window opens. Any guest still active when the window
   # starts is retired immediately regardless of this value.
   min_minutes_before_sunset: 90
+  # A guest is only picked while the sun is at least this high (degrees) at
+  # ITS location. Replaces a fixed 07:00-18:00 local, which let Baleal be
+  # picked before its ~07:40 October sunrise and served dark, grainy frames.
+  min_sun_elevation: 6
+  # Reject guest frames that are mostly grey (no colour at all): fog, static,
+  # darkness. Fog/noise/black measure 100%. 0.92, not lower: Baleal's
+  # hazy-sky open-sea views measured 70-81% on 2026-10-08 and are real
+  # frames; most clear frames are 15-35%.
+  # If none of a guest's frames is usable, the panel keeps the main image.
+  max_grey_fraction: 0.92
+  # Every guest frame is kept in data/guest_archive/ with its score, for
+  # tuning the gate above on real fog. Days of history to keep.
+  archive_days: 14
   cameras:
     # --- Verified live ---
     - name: "Baleal"
