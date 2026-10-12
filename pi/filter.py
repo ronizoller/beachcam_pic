@@ -5,6 +5,7 @@ Uses heuristics based on color distribution, edge density, and image comparison.
 
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -31,15 +32,17 @@ class FrameFilter:
 
     def __init__(self):
         self.config = get_config()
-        self.last_good_hash: Optional[str] = None
-        self.last_good_histogram: Optional[np.ndarray] = None
+        # Last good frame per camera: key -> (histogram, time it was taken).
+        # Per camera so a guest beach is never compared against Tel Aviv.
+        self._last_good: dict = {}
 
-    def filter(self, image: Image.Image) -> FilterResult:
+    def filter(self, image: Image.Image, key: str = "") -> FilterResult:
         """
         Check if an image is a valid beach frame.
 
         Args:
             image: PIL Image to check.
+            key: camera name; the similarity check compares within one camera.
 
         Returns:
             FilterResult with validation status.
@@ -54,7 +57,7 @@ class FrameFilter:
             self._check_not_solid_color(image),
             self._check_color_distribution(image, settings),
             self._check_edge_density(image, settings),
-            self._check_similarity_to_last_good(image, settings),
+            self._check_similarity_to_last_good(image, settings, key),
         ]
 
         # Aggregate results
@@ -70,8 +73,7 @@ class FrameFilter:
             )
 
         # Frame is valid - update last good reference
-        self.last_good_hash = img_hash
-        self.last_good_histogram = self._compute_histogram(image)
+        self._last_good[key] = (self._compute_histogram(image), time.monotonic())
 
         return FilterResult(is_valid=True, image_hash=img_hash)
 
@@ -173,20 +175,28 @@ class FrameFilter:
         return FilterResult(is_valid=True)
 
     def _check_similarity_to_last_good(
-        self, image: Image.Image, settings: dict
+        self, image: Image.Image, settings: dict, key: str = ""
     ) -> FilterResult:
         """
         Compare to last known good frame.
         Very different frames might be ads or errors.
+
+        The reference expires after max_reference_age_minutes. A rejected frame
+        never becomes the reference, so without expiry one real scene change
+        (last night's frame vs an overcast morning, 2026-10-12) rejected every
+        frame for the rest of the day. An ad lasts seconds; a scene that is
+        still "different" half an hour later is the new normal.
         """
-        if self.last_good_histogram is None:
-            # No reference yet, accept
+        ref = self._last_good.get(key)
+        max_age = float(settings.get("max_reference_age_minutes", 30)) * 60
+        if ref is None or time.monotonic() - ref[1] > max_age:
+            # No reference yet, or too old to judge against: accept
             return FilterResult(is_valid=True)
 
         min_similarity = settings.get("min_similarity", 0.3)
 
         current_hist = self._compute_histogram(image)
-        similarity = np.minimum(current_hist, self.last_good_histogram).sum()
+        similarity = np.minimum(current_hist, ref[0]).sum()
 
         if similarity < min_similarity:
             return FilterResult(

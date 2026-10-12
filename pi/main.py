@@ -331,7 +331,7 @@ class BeachCamService:
             logger.debug(f"Rotated {rotation}° and trimmed borders")
 
         # --- Step 3: Filter ---
-        filter_result = self.filter.filter(cropped_img)
+        filter_result = self.filter.filter(cropped_img, key=fetch_result.camera_name)
         if not filter_result.is_valid:
             logger.warning(f"Frame rejected by filter: {filter_result.reason}")
 
@@ -410,7 +410,11 @@ class BeachCamService:
             "score": score,
             "sharpness": score_details.get("sharpness", 0.0),
             "camera": fetch_result.camera_name,
-            "hash": filter_result.image_hash if filter_result.is_valid else None,
+            # Always the real hash: it answers "is this the image already on
+            # the panel?". Rejected frames used to get None, so after one
+            # None was shown every later rejected frame matched it and the
+            # panel froze (2026-10-12).
+            "hash": filter_result.image_hash,
             "guest": is_guest,
             "guest_camera": camera if is_guest else None,
         })
