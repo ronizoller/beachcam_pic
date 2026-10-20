@@ -177,6 +177,10 @@ class BeachCamService:
         self._guest_state_path = self.data_dir / "guest_state.json"
         self._load_guest_state()
 
+        # The candidate pool survives restarts too — see _load_pool.
+        self._pool_path = self.candidates_dir / "pool.json"
+        self._load_pool()
+
         # Schedule guest beach for today
         self._schedule_guest()
 
@@ -418,6 +422,7 @@ class BeachCamService:
             "guest": is_guest,
             "guest_camera": camera if is_guest else None,
         })
+        self._save_pool()
 
         logger.info(
             f"Candidate #{len(self._candidates)} scored {score:.3f} "
@@ -489,6 +494,7 @@ class BeachCamService:
             json.dump(metadata, f, indent=2)
 
         self._last_hash = best.get("hash")
+        self._save_pool()
 
         logger.info("Pipeline complete!")
         return True
@@ -554,6 +560,56 @@ class BeachCamService:
             os.replace(tmp, self._guest_state_path)
         except Exception as e:
             logger.warning(f"Could not save guest state: {e}")
+
+    def _load_pool(self):
+        """
+        Restore the candidate pool from disk.
+
+        The pool used to live only in memory. On 2026-10-20 the watchdog
+        rebooted the Pi at 18:29, three minutes before the sunset window
+        closed: the 0.815 sunset frame was lost, and the one dark frame
+        fetched after the restart was the only candidate, so it stayed on
+        the panel all night.
+
+        A pool older than the max age is ignored, the same rule that would
+        have cleared it had the service kept running.
+        """
+        try:
+            if not self._pool_path.exists():
+                return
+            data = json.loads(self._pool_path.read_text())
+            since = datetime.fromisoformat(data["since"])
+            age_hours = (datetime.now() - since).total_seconds() / 3600
+            if age_hours >= self._max_candidates_age_hours:
+                return
+            candidates = [dict(c, path=Path(c["path"])) for c in data["candidates"]]
+            if not all(c["path"].exists() for c in candidates):
+                return
+            self._candidates = candidates
+            self._candidates_since = since
+            self._was_golden_hour_last_cycle = bool(data.get("was_golden"))
+            self._last_hash = data.get("last_hash")
+            logger.info(
+                f"Restored candidate pool: {len(candidates)} candidates, "
+                f"best {self._best_score():.3f}"
+            )
+        except Exception as e:
+            logger.warning(f"Could not restore candidate pool ({e}) — starting fresh")
+
+    def _save_pool(self):
+        """Persist the candidate pool atomically after every change."""
+        try:
+            payload = {
+                "since": self._candidates_since.isoformat(),
+                "was_golden": self._was_golden_hour_last_cycle,
+                "last_hash": self._last_hash,
+                "candidates": [dict(c, path=str(c["path"])) for c in self._candidates],
+            }
+            tmp = self._pool_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload))
+            os.replace(tmp, self._pool_path)
+        except Exception as e:
+            logger.warning(f"Could not save candidate pool: {e}")
 
     def _schedule_guest(self):
         """Pick a random trigger time for today's guest beach."""
@@ -919,6 +975,7 @@ class BeachCamService:
                 logger.warning(f"Failed to delete candidate: {e}")
         self._candidates.clear()
         self._candidates_since = datetime.now()
+        self._save_pool()
         logger.info(f"Candidates cleared ({reason})")
 
     def _get_guest_info(self) -> dict:
