@@ -1146,6 +1146,33 @@ class BeachCamService:
                 return key.replace("_raw", "")
         return None
 
+    def _in_sunset_final_stretch(self) -> bool:
+        """
+        True during the last N minutes of the sunset window
+        (sunset_final_stretch_minutes), where fetching runs at its fastest.
+
+        That stretch is where the pick is usually decided: the Jaffa lights
+        come on while the sky still holds colour, and it lasts only a few
+        minutes before the sky drops below min_sky_brightness. The camera
+        cycles between views every ~2.5 min, so a 2-min cadence can miss the
+        zoomed Jaffa view for that whole moment.
+        """
+        stretch = int(self.config.timing.get("sunset_final_stretch_minutes", 0))
+        if stretch <= 0 or self._golden_phase() != "sunset":
+            return False
+        sun_times = self._get_sun_times()
+        t_str = sun_times.get("sunset_raw") if sun_times else None
+        if not t_str:
+            return False
+        tz = pytz.timezone(
+            self.config.timing.get("active_hours", {}).get("timezone", "UTC")
+        )
+        now = datetime.now(tz)
+        h, m = map(int, t_str.split(":"))
+        sunset = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        delta_min = (now - sunset).total_seconds() / 60.0
+        return delta_min >= self._sunset_active_end_minutes() - stretch
+
     def _is_active_time(self) -> bool:
         """Check if current time is within active hours (sunrise to sunset)."""
         active_hours = self.config.timing.get("active_hours", {})
@@ -1334,10 +1361,13 @@ class BeachCamService:
         golden_interval = int(
             self.config.timing.get("golden_hour_fetch_interval_minutes", interval)
         )
+        final_interval = int(
+            self.config.timing.get("sunset_final_fetch_interval_minutes", golden_interval)
+        )
 
         # Run immediately on start
-        self.fetch_and_process()
         last_fetch = time.monotonic()
+        self.fetch_and_process()
 
         # Hand-rolled cadence instead of a fixed `schedule` job: the interval
         # has to shrink inside the golden-hour window, where sunset colour
@@ -1354,14 +1384,23 @@ class BeachCamService:
                 self._sleep_until_sunrise()
                 last_fetch = float("-inf")  # fetch immediately on waking
 
-            cadence = golden_interval if self._is_golden_hour() else interval
+            if self._in_sunset_final_stretch():
+                cadence = final_interval
+            elif self._is_golden_hour():
+                cadence = golden_interval
+            else:
+                cadence = interval
             if cadence != last_cadence:
                 logger.info(f"Fetch cadence now {cadence}min")
                 last_cadence = cadence
 
+            # Timed from the START of each fetch, not the end. Processing takes
+            # ~30-40 s on the Pi Zero, so timing from the end stretched the
+            # 2-min golden cadence to ~2.5-2.7 min (measured 2026-11-11). If a
+            # fetch outlasts the cadence, the next one simply starts right away.
             if time.monotonic() - last_fetch >= cadence * 60:
-                self.fetch_and_process()
                 last_fetch = time.monotonic()
+                self.fetch_and_process()
 
             time.sleep(1)
 

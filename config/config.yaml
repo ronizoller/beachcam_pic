@@ -71,6 +71,16 @@ timing:
   # and can miss the peak entirely.
   golden_hour_fetch_interval_minutes: 2
 
+  # Even tighter sampling in the LAST N minutes of the sunset window. That is
+  # usually where the pick is decided — Jaffa's lights come on while the sky
+  # still has colour, a moment lasting only a few minutes before the sky
+  # falls below min_sky_brightness. The camera cycles wide/mid/Jaffa views
+  # every ~2.5 min, so at a 2-min cadence we can miss the Jaffa view for that
+  # whole moment. On 2026-11-11 it landed at 17:07, two minutes before the
+  # gate closed. 0 disables.
+  sunset_final_stretch_minutes: 10
+  sunset_final_fetch_interval_minutes: 1
+
 # ========== CANDIDATE SELECTION ==========
 selection:
   # Highest score wins, but once two frames are within this margin the colour
