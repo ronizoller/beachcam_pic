@@ -97,6 +97,12 @@ def score_frame(
             details["final"] = round(base, 4)
         return base
 
+    if method == "zones":
+        return _score_golden_zones(
+            arr, sky_fraction=sky_fraction, details=details,
+            min_sky_brightness=min_sky_brightness,
+        )
+
     bonus = _golden_hour_bonus(
         arr, sky_fraction=sky_fraction, details=details,
         min_sky_brightness=min_sky_brightness,
@@ -115,6 +121,97 @@ def score_frame(
     logger.info(
         f"Golden-hour scoring [{profile}]: base={base:.3f}, "
         f"warm_sky_bonus={bonus:.3f} (weighted {weighted:.3f}), final={final:.3f}"
+    )
+    return final
+
+
+# --- Golden-hour scoring for the Jaffa camera ---
+#
+# The daytime zone score finds Jaffa and the beach by counting WARM pixels.
+# At sunset everything is warm, so it stops measuring what it claims to:
+#   - the Jaffa box fills with orange sky: 96% "Jaffa" on a frame with no
+#     Jaffa in it (2026-11-14 17:04) vs 97% on the real lit Jaffa view;
+#   - the beach strip counts golden reflections on the WATER as sand, since
+#     the real sand has gone dark — and beach carries the biggest weight;
+#   - the warm-sky bonus saturates at 1.0 on nearly every frame.
+# Net effect: on 2026-11-14 an empty sea frame (1.00) beat the lit Jaffa view
+# (0.89). On 2026-11-11 the right frame won only because promenade lights
+# happened to count as "sand".
+#
+# So inside the golden window the Jaffa camera is scored on two things only:
+# is Jaffa REALLY in the frame (by structure, not colour), weighted most, and
+# how warm the sky is, no longer capped at "warm enough".
+GOLDEN_JAFFA_WEIGHT = 0.6
+GOLDEN_SKY_WEIGHT = 0.4
+# warm_score at which the sky term tops out. The old bonus capped at 0.5,
+# which every frame of a decent sunset reached. Measured warm_scores run
+# 0.6-0.95 for good dusk skies and up to 1.17 right at sunset.
+GOLDEN_SKY_FULL = 1.2
+# Overall scale, so a perfect sunset frame reaches 1.5 — the same ceiling as
+# the old base+bonus. Golden frames must still outrank daytime frames
+# (0.0-1.0) left in the pool at sunrise.
+GOLDEN_SCALE = 1.5
+
+
+def _jaffa_structure(arr: np.ndarray, details: Optional[dict] = None) -> float:
+    """
+    Is Jaffa really in the frame? Judged by DETAIL, not colour.
+
+    Compares how textured the top-left of the frame is against the top-right,
+    which is plain sky in every view this camera has. Jaffa's buildings,
+    windows and trees are full of edges; sky is smooth whatever colour it is.
+
+    Measured on the 2026-11-11 and 2026-11-14 archives (frames downsized to
+    480 px wide): every zoomed-Jaffa view scored a ratio of 3.4-12.6, every
+    sea-only view 0.4-1.7, and wide views with a small sliver of lit Jaffa at
+    the edge 2.5-3.8. The ramp below maps 1.5 -> 0 and 5.5 -> 1.
+    """
+    # Fixed working size: keeps the ratio independent of camera resolution
+    # and JPEG noise, and keeps this cheap on the Pi Zero.
+    h0, w0 = arr.shape[:2]
+    small = np.array(
+        Image.fromarray(arr.astype(np.uint8)).resize((480, max(1, int(480 * h0 / w0)))),
+        dtype=np.float32,
+    ).mean(axis=2)
+    h, w = small.shape
+    band = small[:max(2, int(h * 0.12))]
+    left = band[:, :int(w * 0.35)]
+    right = band[:, int(w * 0.65):]
+
+    def texture(g: np.ndarray) -> float:
+        return float(np.abs(np.diff(g, axis=0)).mean() + np.abs(np.diff(g, axis=1)).mean())
+
+    ratio = texture(left) / max(texture(right), 0.1)
+    score = min(1.0, max(0.0, (ratio - 1.5) / 4.0))
+    if details is not None:
+        details["jaffa_texture_ratio"] = round(ratio, 2)
+        details["jaffa_structure"] = round(score, 4)
+    return score
+
+
+def _score_golden_zones(
+    arr: np.ndarray, sky_fraction: float, details: Optional[dict],
+    min_sky_brightness: float,
+) -> float:
+    """Golden-hour score for the Jaffa camera — see the block comment above."""
+    jaffa = _jaffa_structure(arr, details)
+    sub: dict = {}
+    _golden_hour_bonus(
+        arr, sky_fraction=sky_fraction, details=sub,
+        min_sky_brightness=min_sky_brightness,
+    )
+    # warm_score is already forced to 0 below the sky-brightness gate.
+    sky = min(1.0, sub.get("warm_score", 0.0) / GOLDEN_SKY_FULL)
+    final = GOLDEN_SCALE * (GOLDEN_JAFFA_WEIGHT * jaffa + GOLDEN_SKY_WEIGHT * sky)
+    if details is not None:
+        details.update(sub)
+        details.update({
+            "sky_term": round(sky, 4),
+            "final": round(final, 4),
+        })
+    logger.info(
+        f"Golden-hour scoring [jaffa]: jaffa_structure={jaffa:.3f}, "
+        f"sky={sky:.3f}, final={final:.3f}"
     )
     return final
 
