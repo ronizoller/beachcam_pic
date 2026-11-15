@@ -299,6 +299,7 @@ class BeachCamService:
 
         # --- Step 2: Crop ---
         raw_img = Image.open(fetch_result.image_path)
+        main_camera = self.config.cameras[0] if self.config.cameras else {}
 
         if is_guest:
             # Fisheye cams: straighten the lens bend first, on the full frame
@@ -309,6 +310,20 @@ class BeachCamService:
             # Use guest camera's crop_box
             crop_box = camera.get("crop_box")
             cropped_img = raw_img.crop(tuple(crop_box)) if crop_box else raw_img
+        elif main_camera.get("rotation") and main_camera.get("crop_box"):
+            # Level the main camera on the FULL frame, pivoting on the top-left
+            # corner, then crop. Pivoting there keeps Jaffa (left edge) in
+            # place, and the frame's spare area above and right of crop_box
+            # fills what would otherwise be black corners. Rotating the
+            # cropped frame about its centre instead lifted the left side and
+            # cut the top off the Jaffa tower in the zoomed view (2026-11-15).
+            rotation = float(main_camera["rotation"])
+            leveled = raw_img.convert("RGB").rotate(
+                rotation, center=(0, 0), resample=Image.Resampling.BICUBIC,
+                fillcolor=(0, 0, 0),
+            )
+            cropped_img = leveled.crop(tuple(main_camera["crop_box"]))
+            logger.debug(f"Levelled main camera by {rotation}° about top-left, then cropped")
         else:
             # Use main camera cropper
             cropped_img = self.cropper.crop(
@@ -319,11 +334,9 @@ class BeachCamService:
                 logger.error("Crop failed, using raw image")
                 cropped_img = raw_img
 
-        # --- Step 2b: Rotation (level tilted cameras) ---
+        # --- Step 2b: Rotation (level tilted guest cameras) ---
+        # The main camera is levelled above, before its crop.
         rotation = camera.get("rotation") if is_guest else None
-        if not rotation:
-            main_camera = self.config.cameras[0] if self.config.cameras else {}
-            rotation = main_camera.get("rotation") if not is_guest else None
         if rotation:
             # Positive = counter-clockwise in PIL
             cropped_img = cropped_img.rotate(rotation, expand=True, fillcolor=(0, 0, 0))
@@ -331,7 +344,6 @@ class BeachCamService:
             w, h = cropped_img.size
             margin = int(max(w, h) * abs(rotation) * 1.5 / 100)
             cropped_img = cropped_img.crop((margin, margin, w - margin, h - margin))
-            logger.debug(f"Rotated {rotation}° and trimmed borders")
             logger.debug(f"Rotated {rotation}° and trimmed borders")
 
         # --- Step 3: Filter ---
@@ -363,6 +375,9 @@ class BeachCamService:
             ),
             sky_fraction=sky_fraction,
             details=score_details,
+            minutes_after_sunset=(
+                self._minutes_after_sunset() if golden_phase == "sunset" else None
+            ),
         )
 
         # --- Step 5b: Guest quality gate ---
@@ -1172,6 +1187,20 @@ class BeachCamService:
         sunset = now.replace(hour=h, minute=m, second=0, microsecond=0)
         delta_min = (now - sunset).total_seconds() / 60.0
         return delta_min >= self._sunset_active_end_minutes() - stretch
+
+    def _minutes_after_sunset(self) -> Optional[float]:
+        """Minutes since today's real sunset (negative before it), or None."""
+        sun_times = self._get_sun_times()
+        t_str = sun_times.get("sunset_raw") if sun_times else None
+        if not t_str:
+            return None
+        tz = pytz.timezone(
+            self.config.timing.get("active_hours", {}).get("timezone", "UTC")
+        )
+        now = datetime.now(tz)
+        h, m = map(int, t_str.split(":"))
+        sunset = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        return (now - sunset).total_seconds() / 60.0
 
     def _is_active_time(self) -> bool:
         """Check if current time is within active hours (sunrise to sunset)."""

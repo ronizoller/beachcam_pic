@@ -9,15 +9,25 @@ cameras:
     priority: 1
     type: "snapshot"
     scoring_profile: "jaffa"
-    # Crop out the "(c)BeachCam Israel" watermark at the top
     # Format: [left, top, right, bottom]
-    crop_box: [0, 80, 1920, 1080]
+    # Top 80 drops the "(c)BeachCam Israel" watermark. The panel is 4:3, so
+    # 1000 rows allow 1333 columns: the crop keeps the LEFT edge, where Jaffa
+    # is in every camera view, and the cut comes off the right. The old
+    # full-width crop was centre-cropped by the processor, cutting 293 px off
+    # each side and losing the Jaffa tower in the zoomed view (2026-11-15).
+    crop_box: [0, 80, 1333, 1080]
     # Fraction of the CROPPED frame height that is actually sky, used by the
     # golden-hour scorer. Measured on this camera: the horizon sits at row 234
     # of the 1080-row raw frame, and crop_box drops the top 80, leaving sky at
     # 154/1000 = 15.4% of the cropped height. The scorer previously assumed
     # 60%, so three quarters of its "sky" was sea.
     sky_fraction: 0.15
+    # The camera is rolled: the horizon rises to the right by 3.2-3.4 deg in
+    # every view (measured by hand on the 2026-11-15 archive, zoomed, mid and
+    # wide). Negative = clockwise. Applied to the FULL frame, pivoting on the
+    # top-left corner, BEFORE crop_box — so crop_box needs no extra trim and
+    # Jaffa stays where it is. Checked: no black corners in the crop at -3.3.
+    rotation: -3.3
     wait_seconds: 0
 
 # ========== TIMING ==========
@@ -92,7 +102,9 @@ selection:
   # Keep this SMALL. Sharpness is not a quality-of-sunset signal — the sharpest
   # frame of an evening is usually an early, bright, colourless one — so a wide
   # margin would let crisp-but-dull frames beat real sunsets. 0 disables it.
-  sharpness_tiebreak_margin: 0.05
+  # 0.05 was too wide: re-scoring 2026-11-11 with the 2026-11-15 sunset terms,
+  # it swapped the 17:07 lit-Jaffa pick for a duller 17:01 frame 0.04 behind. 0.02 still covers the 0.0084 case.
+  sharpness_tiebreak_margin: 0.02
 
 # ========== DISPLAY (E-Ink) ==========
 display:

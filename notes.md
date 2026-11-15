@@ -368,8 +368,28 @@ series with only the highlighted span in green, against a labelled 0/5/10 axis.
 
 ## Sunset (goodnight) image selection
 
-Reviewed 2026-11-11 — **scorer left unchanged**; both the 16:41 tower-silhouette and the 17:07
-lit-Jaffa frames were judged good. Bad days are reported manually and investigated then.
+**2026-11-15 — sunset scoring, crop and levelling changed.** `7ee50f1` maxed out: every frame had
+Jaffa and the orange sky at sunset filled the sky term, so ~5 frames tied and the sharpness
+tie-break picked a flat pre-sunset frame (16:37). Now, inside the sunset window only:
+`1.5 × (0.35 Jaffa + 0.25 sky area + 0.20 after-sunset + 0.20 lights)`.
+Jaffa = texture OR floodlit stone anywhere in the upper half; sky area = how much smooth warm
+sky is visible; after-sunset ramps 0→1 over the first 20 min; lights = brightest points vs the
+scene median. Sharpness tie-break margin 0.05 → 0.02. Sunrise and daytime unchanged.
+Crop is now `[0, 80, 1333, 1080]` (keeps the left edge, where Jaffa is; the old full-width crop
+was centre-cropped by the processor and lost the tower in the zoomed view), and the main camera
+is levelled by −3.3° about the top-left corner before cropping (horizon rose 3.2–3.4° to the
+right in every view). Re-scored picks: 08-27 19:39, 11-11 17:07, 11-14 17:07 lit Jaffa,
+11-15 17:08 (Roni's pick). Since 11-15 the camera burns a date/time line under the watermark;
+the 80 px cut leaves it visible top-left — left as is, the frame's passe-partout may hide it.
+
+**2026-11-14 — sunset scoring changed (`7ee50f1`).** An empty-sea frame beat the lit Jaffa view
+because the daytime score counts warm pixels, and at sunset everything is warm. Inside the golden
+window the Jaffa camera is now scored `1.5 × (0.6 × Jaffa structure + 0.4 × sky warmth)`. Jaffa is
+detected by texture (top-left vs the plain-sky top-right), not colour, and beach colour is dropped.
+Also `77287ae`: 1-min sampling in the last 10 min of the window. Bad days are reported manually
+and investigated then (no automatic multi-day archive).
+
+(The 2026-11-11 notes below describe the scorer before that change.)
 
 - **Only the latest evening is kept** in `data/golden_archive/<date>/sunset/` (frames + `manifest.jsonl`
   with score breakdown). It is deleted at the next sunset or service restart, so copy it quickly:
@@ -378,8 +398,6 @@ lit-Jaffa frames were judged good. Bad days are reported manually and investigat
 - Within the sunset window the warm-sky bonus is usually maxed at 1.0, so the composition score
   decides — and at dusk it effectively counts streetlights (its detectors look for warm pixels).
   Result: the pick tends to be the last lit-up Jaffa frame before the sky-darkness gate (110).
-- Ready alternative if the silhouette look is preferred later (tested on one evening):
-  `final = 0.3*base + 0.5*warm_score*sky_brightness/255` during sunset, warm_score uncapped.
 
 ---
 

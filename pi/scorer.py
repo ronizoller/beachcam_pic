@@ -47,6 +47,7 @@ def score_frame(
     sky_fraction: float = 0.15,
     details: Optional[dict] = None,
     min_sky_brightness: float = MIN_SKY_BRIGHTNESS,
+    minutes_after_sunset: Optional[float] = None,
 ) -> float:
     """
     Score a frame's composition quality.
@@ -66,6 +67,9 @@ def score_frame(
             (base, bonus, sub-signals). Used to archive per-frame diagnostics
             so a night's candidates can be reviewed offline and the selection
             second-guessed against what a human would have picked.
+        minutes_after_sunset: Set only inside the SUNSET window (negative
+            before sunset). Enables the dusk terms of the golden Jaffa score;
+            None (sunrise) keeps the plain Jaffa + sky score.
 
     Returns:
         Score, typically 0.0–1.0 but may exceed 1.0 when golden_hour=True
@@ -101,6 +105,7 @@ def score_frame(
         return _score_golden_zones(
             arr, sky_fraction=sky_fraction, details=details,
             min_sky_brightness=min_sky_brightness,
+            minutes_after_sunset=minutes_after_sunset,
         )
 
     bonus = _golden_hour_bonus(
@@ -152,6 +157,102 @@ GOLDEN_SKY_FULL = 1.2
 # (0.0-1.0) left in the pool at sunrise.
 GOLDEN_SCALE = 1.5
 
+# --- Sunset only (2026-11-15) ---
+# Jaffa + sky alone saturated: on 2026-11-15 every frame had Jaffa (1.00) and
+# the orange sky right at sunset maxed the sky term, so ~5 frames tied near
+# 1.49 and the sharpness tie-break handed the night to a flat, pre-sunset one
+# (16:37). The frames worth keeping all night come 20-30 min AFTER sunset:
+# Jaffa floodlit, street lights on, and a wide band of pink sky. So:
+#   - jaffa:  structure (top band texture) OR the floodlit tower anywhere in
+#             the upper half — the top-band check alone missed Jaffa in the
+#             wide view once the crop was narrowed (2026-11-15 17:08 = 0.00);
+#   - sky:    how MUCH warm, smooth sky is visible, not just its colour;
+#   - dusk:   minutes after sunset, 0 at sunset -> 1 at +20;
+#   - lights: lit points standing out from a darkening scene.
+# Re-scored on the three saved evenings (in the left-anchored crop) this picks
+# the frame Roni chose every time: 11-11 17:07, 11-14 17:07, 11-15 17:08.
+# Three evenings is a small sample — re-check the next bad pick against it.
+SUNSET_JAFFA_WEIGHT = 0.35
+SUNSET_SKY_WEIGHT = 0.25
+SUNSET_DUSK_WEIGHT = 0.2
+SUNSET_LIGHTS_WEIGHT = 0.2
+SUNSET_DUSK_FULL_MIN = 20.0
+# Glow = 99.5th-percentile minus median brightness. Measured: daylight and
+# sunset-glare frames 30-60; dusk with lights on 85-170.
+SUNSET_GLOW_ZERO = 60.0
+SUNSET_GLOW_FULL = 120.0
+# % of upper-half pixels that look like floodlit stone. Measured: views with
+# no Jaffa 0.00-0.03; lit Jaffa views 0.5-6.
+SUNSET_FLOOD_ZERO = 0.1
+SUNSET_FLOOD_FULL = 0.6
+# Share of the top 45% that is smooth, warm, bright sky. Zoomed views
+# ~0.07-0.25, the wide view under a pink sky 0.45.
+SUNSET_SKYAREA_ZERO = 0.05
+SUNSET_SKYAREA_FULL = 0.5
+
+
+def _small_rgb(arr: np.ndarray) -> np.ndarray:
+    """Frame resized to 480 px wide (fixed scale, cheap on the Pi Zero)."""
+    h0, w0 = arr.shape[:2]
+    return np.array(
+        Image.fromarray(arr.astype(np.uint8)).resize((480, max(1, int(480 * h0 / w0)))),
+        dtype=np.float32,
+    )
+
+
+def _ramp(x: float, zero: float, full: float) -> float:
+    return min(1.0, max(0.0, (x - zero) / (full - zero)))
+
+
+def _jaffa_floodlit(small: np.ndarray, details: Optional[dict] = None) -> float:
+    """Floodlit Jaffa stone (bright warm yellow) anywhere in the upper half."""
+    up = small[:max(1, int(small.shape[0] * 0.5))]
+    r, g, b = up[..., 0], up[..., 1], up[..., 2]
+    pct = float(((r > 190) & (g > 150) & (b < 0.75 * g) & (r - b > 70)).mean() * 100)
+    score = _ramp(pct, SUNSET_FLOOD_ZERO, SUNSET_FLOOD_FULL)
+    if details is not None:
+        details["floodlit_pct"] = round(pct, 2)
+        details["floodlit"] = round(score, 4)
+    return score
+
+
+def _sky_area(small: np.ndarray, details: Optional[dict] = None) -> float:
+    """How much smooth, warm, bright sky the frame shows (top 45%)."""
+    top = small[:max(3, int(small.shape[0] * 0.45))]
+    gy = top.mean(axis=2)
+    smooth = np.zeros_like(gy, dtype=bool)
+    smooth[1:-1, 1:-1] = (
+        np.abs(gy[2:, 1:-1] - gy[:-2, 1:-1]) + np.abs(gy[1:-1, 2:] - gy[1:-1, :-2])
+    ) < 6
+    warm = (top[..., 0] > top[..., 2] + 20) & (gy > 100) & smooth
+    area = float(warm.mean())
+    score = _ramp(area, SUNSET_SKYAREA_ZERO, SUNSET_SKYAREA_FULL)
+    if details is not None:
+        details["sky_area"] = round(area, 3)
+        details["sky_area_term"] = round(score, 4)
+    return score
+
+
+def _jaffa_lights(arr: np.ndarray, details: Optional[dict] = None) -> float:
+    """
+    Are the lights on? How far the brightest points stand out from the scene.
+
+    Looks at rows 12-60% of the frame: below the camera's white timestamp
+    text (which would otherwise always be the brightest thing) and above the
+    beach. In daylight the brightest pixels are barely above the median; at
+    dusk the floodlit tower and street lights are near white while everything
+    around them has gone dark.
+    """
+    small = _small_rgb(arr).mean(axis=2)
+    h = small.shape[0]
+    band = small[int(h * 0.12):max(int(h * 0.12) + 1, int(h * 0.60))]
+    glow = float(np.percentile(band, 99.5) - np.median(band))
+    score = _ramp(glow, SUNSET_GLOW_ZERO, SUNSET_GLOW_FULL)
+    if details is not None:
+        details["glow"] = round(glow, 1)
+        details["lights_term"] = round(score, 4)
+    return score
+
 
 def _jaffa_structure(arr: np.ndarray, details: Optional[dict] = None) -> float:
     """
@@ -192,8 +293,9 @@ def _jaffa_structure(arr: np.ndarray, details: Optional[dict] = None) -> float:
 def _score_golden_zones(
     arr: np.ndarray, sky_fraction: float, details: Optional[dict],
     min_sky_brightness: float,
+    minutes_after_sunset: Optional[float] = None,
 ) -> float:
-    """Golden-hour score for the Jaffa camera — see the block comment above."""
+    """Golden-hour score for the Jaffa camera — see the block comments above."""
     jaffa = _jaffa_structure(arr, details)
     sub: dict = {}
     _golden_hour_bonus(
@@ -202,7 +304,27 @@ def _score_golden_zones(
     )
     # warm_score is already forced to 0 below the sky-brightness gate.
     sky = min(1.0, sub.get("warm_score", 0.0) / GOLDEN_SKY_FULL)
-    final = GOLDEN_SCALE * (GOLDEN_JAFFA_WEIGHT * jaffa + GOLDEN_SKY_WEIGHT * sky)
+    if minutes_after_sunset is None:
+        # Sunrise: unchanged.
+        final = GOLDEN_SCALE * (GOLDEN_JAFFA_WEIGHT * jaffa + GOLDEN_SKY_WEIGHT * sky)
+        extra = ""
+    else:
+        small = _small_rgb(arr)
+        jaffa = max(jaffa, _jaffa_floodlit(small, details))
+        sky_area = _sky_area(small, details)
+        dusk = _ramp(minutes_after_sunset, 0.0, SUNSET_DUSK_FULL_MIN)
+        lights = _jaffa_lights(arr, details)
+        final = GOLDEN_SCALE * (
+            SUNSET_JAFFA_WEIGHT * jaffa
+            + SUNSET_SKY_WEIGHT * sky_area
+            + SUNSET_DUSK_WEIGHT * dusk
+            + SUNSET_LIGHTS_WEIGHT * lights
+        )
+        if details is not None:
+            details["minutes_after_sunset"] = round(minutes_after_sunset, 1)
+            details["dusk_term"] = round(dusk, 4)
+            details["jaffa_term"] = round(jaffa, 4)
+        extra = f", jaffa_term={jaffa:.3f}, sky_area={sky_area:.3f}, dusk={dusk:.3f}, lights={lights:.3f}"
     if details is not None:
         details.update(sub)
         details.update({
@@ -211,7 +333,7 @@ def _score_golden_zones(
         })
     logger.info(
         f"Golden-hour scoring [jaffa]: jaffa_structure={jaffa:.3f}, "
-        f"sky={sky:.3f}, final={final:.3f}"
+        f"sky={sky:.3f}{extra}, final={final:.3f}"
     )
     return final
 
