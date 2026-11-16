@@ -27,6 +27,13 @@ turn is itself worth remembering).
      twice per render, yet the frame shows upright. The Pi's `_orient_for_panel` and the firmware
      disagree on who owns orientation. Harmless now; will bite whoever next touches it.
    - `docs/hardware_diagram.md` says "Pi Zero 2 W"; the real board is a Pi Zero W (original).
+6. **Panel looks dark — physical tests next (2026-11-16).** The software is fine (see "Image
+   processing"). Try, cheapest first: grey/dark paper over the cream mat; a day without the
+   glass (then anti-reflective "museum" glass if it helps); more light on that wall. Optional
+   software follow-up only after that: aim red a bit darker (measured red is darker than its
+   target, ~18% of a frame), with a before/after.
+7. **Sunset scoring `7724069` — first live evening 2026-11-16.** If the pick is bad, copy that
+   evening's archive the same night (command in the Sunset section).
 
 ---
 
@@ -212,16 +219,23 @@ sudo journalctl -u surfpi -n 100
 | `/preview` | PNG of the current render — safe |
 | `/raw` | unprocessed camera frame — safe |
 | `/metadata` | JSON: conditions, score, battery, candidates_count — safe |
-| `/image` | BMP for the ESP — **clears the candidate pool; don't fetch it by hand** |
+| `/image` | BMP for the ESP — **clears the candidate pool; don't fetch it by hand** (except while the test card is on) |
+| `/hash` | hash + timestamp of the current render — safe |
+| `/sleep` | minutes the ESP should sleep (30 by day) — safe |
+| `POST /testcard` | from the ESP's next wake, `/image` and `/preview` serve the ink test card (`pi/testcard.py`); pool untouched |
+| `POST /testcard/off` | back to camera frames from the next wake |
 | `/log` | ESP POSTs logs here |
 | `/guests` | guest report |
 
 ### Deploying to the Pi (while the SD card is failing)
 
+**git on the Pi is broken since 2026-11-11 (corrupt object). Deploy with curl from GitHub at the
+pushed commit, then check md5 + size.** One-liner used on 2026-11-16 (run from the laptop):
+
 ```bash
-cd ~/beachcam_pic && git pull && sudo systemctl restart surfpi
-ls -l pi/*.py          # ANY 0-byte file = the card ate the write
+ssh roniz@192.168.1.77 'cd ~/beachcam_pic && B=https://raw.githubusercontent.com/ronizoller/beachcam_pic/<full-sha> && for f in <file> <file>; do curl -fsSL "$B/$f" -o "$f.new" && mv "$f.new" "$f"; done && sync && md5sum <files> && ls -l <files> && sudo systemctl restart surfpi && sleep 5 && systemctl is-active surfpi'
 ```
+Compare with `md5 -r <files>` and `wc -c <files>` on the laptop. ANY 0-byte file = the card ate the write.
 
 - **Signature of a zeroed file:** service exits status 0 in the same second it starts, with no output
   (python running an empty script). A crash gives status 1 + traceback; a missing interpreter gives 203/EXEC.
@@ -229,7 +243,7 @@ ls -l pi/*.py          # ANY 0-byte file = the card ate the write
   `curl -o pi/<f>.py https://raw.githubusercontent.com/ronizoller/beachcam_pic/<sha>/pi/<f>.py`,
   then `sync`, compare `md5sum` on the Pi with `md5 -r` on the laptop, restart.
 - A successful `touch` does **not** prove the card is fine.
-- git on the Pi works for fast-forward pulls (verified 2026-08-28); scp isn't required.
+- (Old: git on the Pi worked for fast-forward pulls until 2026-11-11. No longer.)
 - Minimise writes until reflashed.
 
 ### Failure mode 1: kernel hard-hang (root cause: SD card)
@@ -306,13 +320,58 @@ to a `sync`-ed file.
 ## Image processing / panel colours
 
 Resolved and approved on the glass 2026-08-28 ("now its nice"). Commits `f3d8862` (yellow), `803ef98` (blue).
+Re-examined 2026-11-16 when the panel looked dark — see "Real inks measured" below.
+
+### The whole pipeline (as of `836a7ec`, 2026-11-16)
+
+In `pi/main.py`: fetch 1920×1080 → main camera levelled −3.3° about the top-left → `crop_box`
+`[0,80,1333,1080]` → score and keep the best recent frame.
+In `pi/processor.py`: resize to 1600×1200 (LANCZOS) → saturation ×1.05 → gamma 1.3 → overlay
+(pills / forecast card / battery icon) → Floyd-Steinberg dither to the 6 targets → rotate + flip for the panel.
+Contrast, the linear brightness multiplier and the warm R/B gains were all no-ops and were
+**removed** on 2026-11-16 (output pixel-identical). None of the steps adapts to the picture.
+
+Measured on the 2026-11-16 10:48 frame:
+- **Gamma matters for ink share.** Dither only (no saturation, no gamma): black 16%, white 5%.
+  Current: black 7%, white 13%. Brightness 109 → 130. Keep gamma.
+- **Dithering on the Pi is necessary.** Without it the ESP's `rgbToPanel6()` maps each pixel on its
+  own: 40% of the frame went solid black and the sea became green/white blotches.
+- The new left-anchored crop shows more of the dark hill under Jaffa than the old centre crop.
+  Average brightness is the same (143.6 vs 143.5), but the picture can *feel* heavier.
+
+### Real inks measured (2026-11-16, test card)
+
+How: `curl -X POST http://192.168.1.77:8080/testcard`, wait for the ESP wake (or press RST on the
+FireBeetle), photograph in daylight with the mat in shot, `POST /testcard/off`. The frame glass
+reflects the room and washes out whichever side catches the window — take two shots from
+different angles and use the clean regions of each. Normalised so the cream mat = 225:
+
+| Ink | Pi target | Measured (mat = 225) | Relative to panel white = 255 |
+|---|---|---|---|
+| black | (15,15,15) | (10,10,11) | (19,19,21) |
+| white | (215,212,205) | (128,131,128) | (253,255,253) |
+| blue | (105,155,188) | (66,82,112) | (130,162,221) |
+| yellow | (200,180,110) | (132,119,11) | (255,235,21) |
+| red | (175,45,40) | (77,20,7) | (152,39,13) |
+| green | (30,110,40) | (41,64,48) | (81,126,94) |
+
+What it showed:
+- **Panel white is only ~57% as bright as the mat next to it.** That, plus glass reflections, is
+  why the panel looks dark/dull. It is physical, not software.
+- Relative to the panel's own white, blue is close to its target (an early guess that blue ink is
+  "dark navy" and the main cause was wrong). Red is darker than its target; green is greyer;
+  yellow is much more saturated and is the brightest colour ink.
+- **Dithering against the measured inks is worse:** green 10% → 36%, white 13% → 3%, darker overall —
+  the greyish real green becomes the best match for muted midtones. Don't ship it.
+- The panel and ESP are healthy: every ink lands where it should, black is a true black.
+- In the first card photo the top-left black square looked grey — that was a window reflection, not a fault.
 
 ### Mental model
 
 - `PALETTES["6color"]` in `pi/processor.py` are **match targets for the quantizer, not displayed colours**.
   Firmware `rgbToPanel6()` maps them to the 6 real inks.
 - Moving an anchor **toward** the midtones **grows** its share; away shrinks it.
-- Panel brightness = how much area lands on white/yellow ink. Gamma and the brightness multiplier barely matter.
+- Panel brightness = how much area lands on white/yellow ink. (Gamma does shift that share — see above.)
 - Anchors must still satisfy `rgbToPanel6()`: black mean < 50; white mean > 200, channels within 30;
   red `r>150 && r>g+50 && r>b+50`; yellow `r>150 && g>120 && b<150`; green mean > 50, `g>r, g>b, g>100`.
 
@@ -341,6 +400,8 @@ black (15,15,15) · white (215,212,205) · red (175,45,40) · green (30,115,50),
 - Reddish filter — brighter but kills the blue sea.
 - `saturation` — nearly inert after 6-colour quantization.
 - Shrinking blue — costs the sea.
+- Removing gamma/saturation ("dither only") — measured darker (2026-11-16).
+- Dithering against the measured real inks — measured worse (green takes over).
 
 ### Experiment recipe
 
@@ -381,6 +442,13 @@ is levelled by −3.3° about the top-left corner before cropping (horizon rose 
 right in every view). Re-scored picks: 08-27 19:39, 11-11 17:07, 11-14 17:07 lit Jaffa,
 11-15 17:08 (Roni's pick). Since 11-15 the camera burns a date/time line under the watermark;
 the 80 px cut leaves it visible top-left — left as is, the frame's passe-partout may hide it.
+**Checked on the glass 2026-11-16: the mat hides the date/time line**; Jaffa and the tower are in,
+horizon level.
+
+**The panel lags the live camera by 30–60 min.** The Pi fetches every 5 min and keeps the best-scoring
+recent frame; the ESP wakes only every 30 min (`esp_sleep_minutes`) to download it. The time in the
+bottom-right pill ("Tel Aviv · 10:04") says which frame is showing. Pressing RST on the FireBeetle
+forces an immediate wake + download (the ESP fetches `/image` every wake, no hash check).
 
 **2026-11-14 — sunset scoring changed (`7ee50f1`).** An empty-sea frame beat the lit Jaffa view
 because the daytime score counts warm pixels, and at sunset everything is warm. Inside the golden
