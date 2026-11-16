@@ -32,8 +32,9 @@ turn is itself worth remembering).
    glass (then anti-reflective "museum" glass if it helps); more light on that wall. Optional
    software follow-up only after that: aim red a bit darker (measured red is darker than its
    target, ~18% of a frame), with a before/after.
-7. **Sunset scoring `7724069` — first live evening 2026-11-16.** If the pick is bad, copy that
-   evening's archive the same night (command in the Sunset section).
+7. **Sunset scoring — watch the next evenings.** First live run (2026-11-16) picked a close-up;
+   fixed with the open-sky term (see Sunset section). If a pick is bad, copy that evening's
+   archive the same night (command in the Sunset section).
 
 ---
 
@@ -428,6 +429,14 @@ series with only the highlighted span in green, against a labelled 0/5/10 axis.
 ---
 
 ## Sunset (goodnight) image selection
+
+**2026-11-16 — open sky of any colour counts.** First live evening: the camera rotated between a
+close-up of Jaffa (no sky, tower top cut off), the tower view, and a sea view to the north. The
+pink was only over the sea view; over the tower the sky was blue, so every Jaffa view scored sky 0
+and the lamp-filled close-up won on lights (1.125 vs tower view 1.078). The sky term is now
+`max(warm sky area, 0.6 × open sky)`, where open sky = share of rows 8–45% that is smooth and not
+dark (close-ups 0.05–0.07, tower view 0.50). Re-scored: 11-11/14/15 picks unchanged; 11-16 →
+17:07 tower view, 1.30 vs 1.125 (Roni's pick — the pink sea view is prettier only for its colour).
 
 **2026-11-15 — sunset scoring, crop and levelling changed.** `7ee50f1` maxed out: every frame had
 Jaffa and the orange sky at sunset filled the sky term, so ~5 frames tied and the sharpness

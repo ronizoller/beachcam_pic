@@ -189,6 +189,15 @@ SUNSET_FLOOD_FULL = 0.6
 # ~0.07-0.25, the wide view under a pink sky 0.45.
 SUNSET_SKYAREA_ZERO = 0.05
 SUNSET_SKYAREA_FULL = 0.5
+# 2026-11-16: the sky over the tower view was BLUE (pink only in the sea view
+# to the north), so every Jaffa view scored sky 0 and the lamp-filled close-up
+# (no sky, tower top cut off) beat the tower view on lights, 1.125 vs 1.078.
+# Open sky of any colour now earns up to 0.6 of the sky term. Share of rows
+# 8-45% that is smooth and not dark: close-ups 0.05-0.07, past picks 0.13-0.57,
+# tower view 0.50. Re-scored: 11-11/14/15 picks unchanged, 11-16 -> 17:07 (Roni's choice).
+SUNSET_OPENSKY_ZERO = 0.08
+SUNSET_OPENSKY_FULL = 0.4
+SUNSET_OPENSKY_MAX = 0.6
 
 
 def _small_rgb(arr: np.ndarray) -> np.ndarray:
@@ -230,6 +239,28 @@ def _sky_area(small: np.ndarray, details: Optional[dict] = None) -> float:
     if details is not None:
         details["sky_area"] = round(area, 3)
         details["sky_area_term"] = round(score, 4)
+    return score
+
+
+def _open_sky(small: np.ndarray, details: Optional[dict] = None) -> float:
+    """
+    How much open sky of ANY colour sits above the town (rows 8-45%, below
+    the camera's timestamp). Partial credit only (SUNSET_OPENSKY_MAX): pink sky
+    still scores more, but a blue sky over the whole tower must beat a
+    close-up with no sky at all.
+    """
+    h = small.shape[0]
+    top = small[int(h * 0.08):max(int(h * 0.08) + 3, int(h * 0.45))]
+    gy = top.mean(axis=2)
+    smooth = np.zeros_like(gy, dtype=bool)
+    smooth[1:-1, 1:-1] = (
+        np.abs(gy[2:, 1:-1] - gy[:-2, 1:-1]) + np.abs(gy[1:-1, 2:] - gy[1:-1, :-2])
+    ) < 6
+    area = float((smooth & (gy > 70)).mean())
+    score = SUNSET_OPENSKY_MAX * _ramp(area, SUNSET_OPENSKY_ZERO, SUNSET_OPENSKY_FULL)
+    if details is not None:
+        details["open_sky"] = round(area, 3)
+        details["open_sky_term"] = round(score, 4)
     return score
 
 
@@ -311,7 +342,9 @@ def _score_golden_zones(
     else:
         small = _small_rgb(arr)
         jaffa = max(jaffa, _jaffa_floodlit(small, details))
-        sky_area = _sky_area(small, details)
+        sky_area = max(_sky_area(small, details), _open_sky(small, details))
+        if details is not None:
+            details["sky_view_term"] = round(sky_area, 4)
         dusk = _ramp(minutes_after_sunset, 0.0, SUNSET_DUSK_FULL_MIN)
         lights = _jaffa_lights(arr, details)
         final = GOLDEN_SCALE * (
