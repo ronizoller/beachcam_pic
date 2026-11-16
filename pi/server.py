@@ -96,13 +96,28 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
 
     clear_marker = data_dir / "clear_requested"
 
+    # Test card: while this marker exists, /image and /preview serve the ink
+    # test card (pi/testcard.py) instead of the camera frame. Turned on/off by
+    # POST /testcard and POST /testcard/off. The ESP downloads /image on every
+    # wake, so pressing its reset button shows the card straight away.
+    testcard_marker = data_dir / "testcard_requested"
+    testcard_path = data_dir / "testcard.bmp"
+
+    def _testcard_file() -> Path:
+        if not testcard_path.exists():
+            from testcard import build_test_card
+            tmp = testcard_path.with_suffix(".tmp")
+            build_test_card().save(tmp, format="BMP")
+            os.replace(tmp, testcard_path)
+        return testcard_path
+
     @app.route("/")
     def index():
         """Health check endpoint."""
         return jsonify({
             "status": "ok",
             "service": "beachcam",
-            "endpoints": ["/image", "/hash", "/metadata", "/preview", "/raw", "/sleep", "/guest", "/mode", "/clear", "/clear/done"]
+            "endpoints": ["/image", "/hash", "/metadata", "/preview", "/raw", "/sleep", "/guest", "/mode", "/clear", "/clear/done", "/testcard", "/testcard/off"]
         })
 
     @app.route("/mode")
@@ -129,6 +144,20 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
             clear_marker.unlink()
         return jsonify({"status": "ok"})
 
+    @app.route("/testcard", methods=["POST"])
+    def post_testcard():
+        """Show the ink test card from the ESP's next wake until /testcard/off."""
+        _testcard_file()
+        testcard_marker.touch()
+        return jsonify({"status": "test card on", "next_wake": "ESP will show the test card"})
+
+    @app.route("/testcard/off", methods=["POST"])
+    def post_testcard_off():
+        """Go back to camera frames from the ESP's next wake."""
+        if testcard_marker.exists():
+            testcard_marker.unlink()
+        return jsonify({"status": "test card off"})
+
     @app.route("/image")
     def get_image():
         """
@@ -136,6 +165,11 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
         Returns BMP file optimized for E-Ink display.
         Signals the service to clear candidates for next cycle.
         """
+        if testcard_marker.exists():
+            # Not a real pull: leave the candidate pool alone.
+            return send_file(_testcard_file(), mimetype="image/bmp",
+                             as_attachment=False, download_name="current.bmp")
+
         if not image_path.exists():
             return Response("No image available", status=404)
 
@@ -159,13 +193,14 @@ def create_app(on_image_pulled=None, get_sleep_minutes=None, get_guest_info=None
         in a browser. The on-disk BMP is stored in the panel's native orientation so
         the firmware can stream it row-by-row; humans want the original landscape.
         """
-        if not image_path.exists():
+        src = _testcard_file() if testcard_marker.exists() else image_path
+        if not src.exists():
             return Response("No image available", status=404)
 
         from PIL import Image
         import io
 
-        img = Image.open(image_path)
+        img = Image.open(src)
 
         # Reverse the storage flip first (it was applied last by the processor).
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
