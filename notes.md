@@ -430,6 +430,17 @@ series with only the highlighted span in green, against a labelled 0/5/10 axis.
 
 ## Sunset (goodnight) image selection
 
+**2026-11-18 — Jaffa detector fixed; blur guard.** A sea view with a big orange sky won (1.37) with
+Jaffa only a dark sliver. Two false positives: (1) the texture check looked at the top 12%, where
+the camera's date/time line (since 11-15) is the only detail in a sea view — ratio 14-30, "full
+Jaffa"; (2) the orange sky matched the floodlit-stone colour (10% of the upper half). Sunset now
+checks texture in rows 10-30% (tower views 3.9-7.4, sea views 0.3-1.0) and counts floodlit pixels
+only where there is detail (smooth sky drops out). Also a blur guard (score × ramp(sharpness
+1.5→3.0)): a smeared mid-zoom tower frame (sharpness 2.0) would otherwise have won. Re-scored all
+seven evenings: 11-18 → 17:06 tower view; 08-27, 11-11, 11-14, 11-15, 11-16, 11-17 picks unchanged
+(11-11 margin thin: 1.174 vs a pre-sunset Jaffa frame 1.15). Sunrise still uses the old top-12%
+check (date line affects it too; untested, no sunrise archive).
+
 **2026-11-16 — open sky of any colour counts.** First live evening: the camera rotated between a
 close-up of Jaffa (no sky, tower top cut off), the tower view, and a sea view to the north. The
 pink was only over the sea view; over the tower the sky was blue, so every Jaffa view scored sky 0

@@ -181,10 +181,26 @@ SUNSET_DUSK_FULL_MIN = 20.0
 # sunset-glare frames 30-60; dusk with lights on 85-170.
 SUNSET_GLOW_ZERO = 60.0
 SUNSET_GLOW_FULL = 120.0
-# % of upper-half pixels that look like floodlit stone. Measured: views with
-# no Jaffa 0.00-0.03; lit Jaffa views 0.5-6.
-SUNSET_FLOOD_ZERO = 0.1
-SUNSET_FLOOD_FULL = 0.6
+# % of upper-half pixels that look like floodlit stone AND sit on detail
+# (edge >= SUNSET_FLOOD_EDGE). 2026-11-18: an orange sunset sky matched the
+# stone colour (10% of the upper half), so a sea view with no Jaffa got full
+# Jaffa marks and won. Sky is smooth, stone has windows and edges. Measured
+# with the edge rule: sea views under orange sky 0.0-0.35 (one with a lit
+# sliver of Jaffa 0.87), close-ups and lit tower views 0.5-3.9.
+SUNSET_FLOOD_ZERO = 0.4
+SUNSET_FLOOD_FULL = 1.5
+SUNSET_FLOOD_EDGE = 15.0
+# Jaffa texture check for the sunset score looks at rows 10-30%, not the top
+# 12%: since 2026-11-15 the camera burns a date/time line into the top-left,
+# which made every sea view look "textured" there (ratio 14-30 on 11-18).
+# Rows 10-30%: tower views 3.9-7.4, sea views 0.3-1.0.
+SUNSET_STRUCT_ROWS = (0.10, 0.30)
+# Blur guard: the camera is sometimes caught mid-zoom (2026-11-18 16:59, a
+# smeared tower view, sharpness 2.0, would have won). Score is scaled by
+# ramp(sharpness, 1.5 -> 3.0). Every other archived frame is >= 2.67; dark
+# 08-27 night frames are 3-4, so this does not touch them.
+SUNSET_SHARP_ZERO = 1.5
+SUNSET_SHARP_FULL = 3.0
 # Share of the top 45% that is smooth, warm, bright sky. Zoomed views
 # ~0.07-0.25, the wide view under a pink sky 0.45.
 SUNSET_SKYAREA_ZERO = 0.05
@@ -214,10 +230,16 @@ def _ramp(x: float, zero: float, full: float) -> float:
 
 
 def _jaffa_floodlit(small: np.ndarray, details: Optional[dict] = None) -> float:
-    """Floodlit Jaffa stone (bright warm yellow) anywhere in the upper half."""
-    up = small[:max(1, int(small.shape[0] * 0.5))]
+    """Floodlit Jaffa stone (bright warm yellow, with detail) in the upper half."""
+    up = small[:max(3, int(small.shape[0] * 0.5))]
     r, g, b = up[..., 0], up[..., 1], up[..., 2]
-    pct = float(((r > 190) & (g > 150) & (b < 0.75 * g) & (r - b > 70)).mean() * 100)
+    gy = up.mean(axis=2)
+    edge = np.zeros_like(gy)
+    edge[1:-1, 1:-1] = (
+        np.abs(gy[2:, 1:-1] - gy[:-2, 1:-1]) + np.abs(gy[1:-1, 2:] - gy[1:-1, :-2])
+    )
+    stone = (r > 190) & (g > 150) & (b < 0.75 * g) & (r - b > 70) & (edge >= SUNSET_FLOOD_EDGE)
+    pct = float(stone.mean() * 100)
     score = _ramp(pct, SUNSET_FLOOD_ZERO, SUNSET_FLOOD_FULL)
     if details is not None:
         details["floodlit_pct"] = round(pct, 2)
@@ -285,7 +307,10 @@ def _jaffa_lights(arr: np.ndarray, details: Optional[dict] = None) -> float:
     return score
 
 
-def _jaffa_structure(arr: np.ndarray, details: Optional[dict] = None) -> float:
+def _jaffa_structure(
+    arr: np.ndarray, details: Optional[dict] = None,
+    rows: tuple = (0.0, 0.12),
+) -> float:
     """
     Is Jaffa really in the frame? Judged by DETAIL, not colour.
 
@@ -306,7 +331,7 @@ def _jaffa_structure(arr: np.ndarray, details: Optional[dict] = None) -> float:
         dtype=np.float32,
     ).mean(axis=2)
     h, w = small.shape
-    band = small[:max(2, int(h * 0.12))]
+    band = small[int(h * rows[0]):max(int(h * rows[0]) + 2, int(h * rows[1]))]
     left = band[:, :int(w * 0.35)]
     right = band[:, int(w * 0.65):]
 
@@ -341,7 +366,10 @@ def _score_golden_zones(
         extra = ""
     else:
         small = _small_rgb(arr)
-        jaffa = max(jaffa, _jaffa_floodlit(small, details))
+        jaffa = max(
+            _jaffa_structure(arr, details, rows=SUNSET_STRUCT_ROWS),
+            _jaffa_floodlit(small, details),
+        )
         sky_area = max(_sky_area(small, details), _open_sky(small, details))
         if details is not None:
             details["sky_view_term"] = round(sky_area, 4)
@@ -353,7 +381,10 @@ def _score_golden_zones(
             + SUNSET_DUSK_WEIGHT * dusk
             + SUNSET_LIGHTS_WEIGHT * lights
         )
+        blur = _ramp(sharpness(arr), SUNSET_SHARP_ZERO, SUNSET_SHARP_FULL)
+        final *= blur
         if details is not None:
+            details["blur_factor"] = round(blur, 4)
             details["minutes_after_sunset"] = round(minutes_after_sunset, 1)
             details["dusk_term"] = round(dusk, 4)
             details["jaffa_term"] = round(jaffa, 4)
