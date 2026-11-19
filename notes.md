@@ -430,6 +430,12 @@ series with only the highlighted span in green, against a labelled 0/5/10 axis.
 
 ## Sunset (goodnight) image selection
 
+**2026-11-19 — after-sunset term removed.** Score is now
+`1.5 × (0.4375 Jaffa + 0.3125 sky + 0.25 lights) × blur guard` (same 1.5 ceiling). The
+after-sunset ramp was added 11-15 to stop pre-sunset ties; the open-sky and Jaffa fixes now do
+that. On all 7 archived evenings only 11-11 changes: 17:07 lit → 16:41 bright pre-sunset Jaffa
+(1.44 vs 1.09), Roni's preference. The others keep the same frame.
+
 **2026-11-18 — Jaffa detector fixed; blur guard.** A sea view with a big orange sky won (1.37) with
 Jaffa only a dark sliver. Two false positives: (1) the texture check looked at the top 12%, where
 the camera's date/time line (since 11-15) is the only detail in a sea view — ratio 14-30, "full

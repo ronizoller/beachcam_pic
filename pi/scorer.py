@@ -172,10 +172,14 @@ GOLDEN_SCALE = 1.5
 # Re-scored on the three saved evenings (in the left-anchored crop) this picks
 # the frame Roni chose every time: 11-11 17:07, 11-14 17:07, 11-15 17:08.
 # Three evenings is a small sample — re-check the next bad pick against it.
-SUNSET_JAFFA_WEIGHT = 0.35
-SUNSET_SKY_WEIGHT = 0.25
-SUNSET_DUSK_WEIGHT = 0.2
-SUNSET_LIGHTS_WEIGHT = 0.2
+# 2026-11-19: after-sunset weight removed (0.2 -> 0), the other three scaled
+# up to keep the 1.5 ceiling. Open-sky + Jaffa fixes now do its job: on all 7
+# archived evenings only 11-11 changes, 17:07 lit -> 16:41 bright pre-sunset
+# Jaffa, which Roni prefers. dusk is still computed and logged.
+SUNSET_JAFFA_WEIGHT = 0.4375
+SUNSET_SKY_WEIGHT = 0.3125
+SUNSET_DUSK_WEIGHT = 0.0
+SUNSET_LIGHTS_WEIGHT = 0.25
 SUNSET_DUSK_FULL_MIN = 20.0
 # Glow = 99.5th-percentile minus median brightness. Measured: daylight and
 # sunset-glare frames 30-60; dusk with lights on 85-170.
